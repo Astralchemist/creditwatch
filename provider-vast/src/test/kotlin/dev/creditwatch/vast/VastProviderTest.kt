@@ -32,8 +32,8 @@ class VastProviderTest {
             assertEquals("Bearer sample-key", request.headers[HttpHeaders.Authorization])
             paths += request.url.encodedPath + (request.url.encodedQuery.takeIf(String::isNotEmpty)?.let { "?$it" } ?: "")
             when (request.url.encodedPath) {
-                "/api/v0/users/current" -> respond(fixture("user.json"))
-                "/api/v1/instances" -> respond(
+                "/api/v0/users/current/" -> respond(fixture("user.json"))
+                "/api/v1/instances/" -> respond(
                     fixture(if (request.url.parameters["after_token"] == null) "instances-page-1.json" else "instances-page-2.json")
                 )
                 else -> error("Unexpected path")
@@ -51,6 +51,8 @@ class VastProviderTest {
             assertEquals(BigDecimal("0.02"), instances[1].storageRate?.amountPerHour)
             assertEquals(null, instances[2].storageRate)
             assertTrue(paths.last().contains("after_token=page"))
+            // Vast answers 301 to the slashless forms and the client does not follow redirects.
+            assertTrue(paths.all { it.substringBefore("?").endsWith("/") }, "every path needs a trailing slash: $paths")
             val burn = BurnCalculator().calculate(account.accountId, account.balance.currency, instances, clock.instant())
             assertEquals(BigDecimal("1.05"), burn.knownRate.amountPerHour)
             assertEquals(setOf(CostType.STORAGE, CostType.BANDWIDTH), burn.unknownCosts)
@@ -88,6 +90,21 @@ class VastProviderTest {
             }
             assertEquals(java.time.Duration.ofSeconds(120), failure.retryAfter)
         } finally { client.close() }
+    }
+
+    @Test
+    fun accountAcceptsEitherDocumentedBalanceField(): Unit = runBlocking {
+        val credit = mockClient { _ -> respond("{\"id\":42,\"credit\":24.18}") }
+        try {
+            assertEquals(BigDecimal("24.18"),
+                VastProvider(credit, "sample-key".toCharArray(), clock).getAccountSnapshot().balance.amount)
+        } finally { credit.close() }
+        // Both present: the field the account schema documents wins.
+        val both = mockClient { _ -> respond("{\"id\":42,\"balance\":10.00,\"credit\":99.99}") }
+        try {
+            assertEquals(BigDecimal("10.00"),
+                VastProvider(both, "sample-key".toCharArray(), clock).getAccountSnapshot().balance.amount)
+        } finally { both.close() }
     }
 
     @Test

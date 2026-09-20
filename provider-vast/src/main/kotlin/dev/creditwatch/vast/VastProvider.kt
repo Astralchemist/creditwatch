@@ -49,9 +49,11 @@ class VastProvider(
     private val usd = CurrencyCode("USD")
 
     override suspend fun getAccountSnapshot(): BalanceSnapshot {
-        val body = request("/api/v0/users/current")
+        val body = request("/api/v0/users/current/")
         val user = decode<UserDto>(body)
-        val balance = user.balance?.decimal() ?: throw ProviderFailure.InvalidResponse
+        // Vast's own docs disagree: the account schema documents "balance", the authentication
+        // guide's worked example returns "credit". Accept either, preferring the documented one.
+        val balance = (user.balance ?: user.credit)?.decimal() ?: throw ProviderFailure.InvalidResponse
         return BalanceSnapshot(AccountId("vast:${user.id}"), Money(balance, usd), clock.instant())
     }
 
@@ -60,8 +62,8 @@ class VastProvider(
         val seenTokens = mutableSetOf<String>()
         var nextToken: String? = null
         repeat(100) {
-            val path = if (nextToken == null) "/api/v1/instances?limit=25"
-                else "/api/v1/instances?limit=25&after_token=${java.net.URLEncoder.encode(nextToken, Charsets.UTF_8)}"
+            val path = if (nextToken == null) "/api/v1/instances/?limit=25"
+                else "/api/v1/instances/?limit=25&after_token=${java.net.URLEncoder.encode(nextToken, Charsets.UTF_8)}"
             val page = decode<InstancesPageDto>(request(path))
             if (page.success != true) throw ProviderFailure.InvalidResponse
             instances += page.instances.map(::mapInstance)
@@ -150,6 +152,12 @@ class VastProvider(
     }
 
     companion object {
+        /**
+         * Redirects are not followed, so the Authorization header can never be replayed to
+         * another host. Every request path must therefore be the one Vast serves directly:
+         * the slashless forms answer 301 to the trailing-slash form, which would surface as
+         * [ProviderFailure.Unavailable] and leave the app permanently offline.
+         */
         fun newHttpClient(): HttpClient = HttpClient(CIO) {
             followRedirects = false
             install(HttpTimeout) {
@@ -162,7 +170,11 @@ class VastProvider(
 }
 
 @Serializable
-private data class UserDto(val id: Long, val balance: JsonPrimitive? = null)
+private data class UserDto(
+    val id: Long,
+    val balance: JsonPrimitive? = null,
+    val credit: JsonPrimitive? = null,
+)
 
 @Serializable
 private data class InstancesPageDto(
