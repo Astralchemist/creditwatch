@@ -31,3 +31,18 @@ jobs:
       - name: Test and compile desktop app
         shell: bash
         run: ./gradlew test :app-desktop:compileKotlin --no-daemon --console=plain
+      - name: Verify Windows Credential Manager
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          CREDITWATCH_WINDOWS_CREDENTIAL_SMOKE: '1'
+        run: ./gradlew :app-desktop:test --tests '*WindowsCredentialIntegrationTest' --no-daemon --console=plain
+      - name: Install Linux Secret Service test tools
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dbus-user-session gnome-keyring libsecret-tools
+      - name: Verify Linux Secret Service
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: bash scripts/linux-secret-service-smoke.sh
