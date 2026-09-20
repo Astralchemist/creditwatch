@@ -99,12 +99,18 @@ class VastProviderTest {
             assertEquals(BigDecimal("24.18"),
                 VastProvider(credit, "sample-key".toCharArray(), clock).getAccountSnapshot().balance.amount)
         } finally { credit.close() }
-        // Both present: the field the account schema documents wins.
-        val both = mockClient { _ -> respond("{\"id\":42,\"balance\":10.00,\"credit\":99.99}") }
+        // The live shape: Vast sends both, and only "credit" holds the spendable amount.
+        val both = mockClient { _ -> respond("{\"id\":42,\"balance\":0,\"credit\":4.5057355248999995}") }
         try {
-            assertEquals(BigDecimal("10.00"),
+            assertEquals(BigDecimal("4.5057355248999995"),
                 VastProvider(both, "sample-key".toCharArray(), clock).getAccountSnapshot().balance.amount)
         } finally { both.close() }
+        // Only "balance": still read, so a shape without "credit" is not a zero balance.
+        val onlyBalance = mockClient { _ -> respond("{\"id\":42,\"balance\":12.50}") }
+        try {
+            assertEquals(BigDecimal("12.50"),
+                VastProvider(onlyBalance, "sample-key".toCharArray(), clock).getAccountSnapshot().balance.amount)
+        } finally { onlyBalance.close() }
     }
 
     @Test

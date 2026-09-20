@@ -51,9 +51,11 @@ class VastProvider(
     override suspend fun getAccountSnapshot(): BalanceSnapshot {
         val body = request("/api/v0/users/current/")
         val user = decode<UserDto>(body)
-        // Vast's own docs disagree: the account schema documents "balance", the authentication
-        // guide's worked example returns "credit". Accept either, preferring the documented one.
-        val balance = (user.balance ?: user.credit)?.decimal() ?: throw ProviderFailure.InvalidResponse
+        // Vast returns both fields. On a live credit-only account "balance" was 0.00 while
+        // "credit" held the 4.51 actually available, so "credit" is the spendable figure and
+        // the one this product is about; "balance" is only a fallback for a shape that omits it.
+        // Preferring "balance" here reads as a zero balance and fires an immediate runway alert.
+        val balance = (user.credit ?: user.balance)?.decimal() ?: throw ProviderFailure.InvalidResponse
         return BalanceSnapshot(AccountId("vast:${user.id}"), Money(balance, usd), clock.instant())
     }
 
