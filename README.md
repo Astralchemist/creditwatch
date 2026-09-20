@@ -2,7 +2,7 @@
 
 CreditWatch is a local-first desktop utility for monitoring prepaid cloud credits. It aims to show your balance, known burn rate, estimated runway, and obvious signs of underused resources in a compact dashboard. Vast.ai is the first provider.
 
-**Status:** Vast monitoring slice in progress. On macOS, the app can connect with a Vast.ai key, save it in Keychain, refresh automatically every 60 seconds, and show balance, known burn, and runway from known costs. Samples are stored locally in SQLite for 72 hours. The one-hour burn average feeds safe runway when enough recent samples exist. The app opens a compact menu bar view and has a searchable provider/action palette. Provider and monitoring tests use fake data. Real-account verification, alerts, configurable tiles, and Windows/Linux key storage remain to be built.
+**Status:** Private development. On macOS, the app can connect with a Vast.ai key, save it in Keychain, refresh automatically every 60 seconds, and show balance, known burn, and runway from known costs. Samples are stored locally in SQLite for 72 hours. The one-hour burn average feeds safe runway when enough recent samples exist. The app opens a compact menu bar view and has a searchable provider/action palette. Fresh low-runway readings trigger 12h, 6h, and 1h alerts with persisted deduplication and tray notifications. Provider and monitoring tests use fake data. Real-account verification, burn-spike alerts, configurable tiles, and Windows/Linux key storage remain to be built.
 
 ## Principles
 
@@ -54,7 +54,7 @@ The app is the composition root. The core modules must not depend on Compose, HT
 2. **Vast connection:** minimum-permission API key, OS secret store, validation, account and instance reads.
 3. **First useful view:** balance, known burn, raw runway, and safe runway with clear data quality labels.
 4. **Monitoring:** polling, bounded history, stale/offline state, backoff.
-5. **Alerts:** rules, hysteresis, deduplication, desktop notifications.
+5. **Alerts:** low-runway rules, hysteresis, persisted deduplication, and tray notifications are in place; burn-spike and efficiency alerts remain.
 6. **Dashboard and tray:** compact tray view and search are in place; twelve configurable tiles remain.
 7. **Optional telemetry:** Linux agent and transparent efficiency hints.
 8. **Packaging:** native artifacts and release checks.

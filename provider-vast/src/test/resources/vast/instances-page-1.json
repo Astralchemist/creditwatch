@@ -1,0 +1,1 @@
+{"success":true,"next_token":"page two","instances":[{"id":18421,"actual_status":"running","label":"training","instance":{"gpuCostPerHour":0.6,"diskHour":0.03},"new_field":"ignored"}]}

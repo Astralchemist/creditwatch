@@ -1,0 +1,1 @@
+{"success":true,"next_token":null,"instances":[{"id":18422,"actual_status":"stopped","label":"paused","instance":{"gpuCostPerHour":0.5,"diskHour":0.02}},{"id":18423,"actual_status":"running","instance":{"gpuCostPerHour":0.4}}]}
