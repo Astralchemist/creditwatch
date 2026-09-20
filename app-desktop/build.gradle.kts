@@ -22,7 +22,7 @@ compose.desktop {
         mainClass = "dev.creditwatch.app.MainKt"
         nativeDistributions {
             packageName = "CreditWatch"
-            packageVersion = "0.1.0"
+            packageVersion = project.version.toString()
         }
     }
 }

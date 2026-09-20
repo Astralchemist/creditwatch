@@ -31,6 +31,12 @@ On macOS, look for the CreditWatch pulse icon near the right end of the menu bar
 
 On this Mac, Homebrew installed JDK 21 at `/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`. If your shell still selects another JDK, set `JAVA_HOME` to that path before running the commands. Open the root directory as a Gradle project in IntelliJ IDEA and select JDK 21 as the Gradle JVM. The build requests a JDK 21 toolchain.
 
+## Delivery and tracking
+
+CreditWatch is a Kotlin/JVM desktop application. It reads Vast.ai through the provider API using a locally stored key. Users will install a native desktop package when packaging is ready; npm and Bun packages are not part of the product.
+
+The planned app version is set once in `gradle.properties`. [Roadmap](ROADMAP.md) tracks release gates, [changelog](CHANGELOG.md) records shipped changes, and [development flow](CONTRIBUTING.md) defines issue, pull request, and release checks. GitHub Actions runs tests and desktop compilation on macOS, Windows, and Linux for pull requests and changes to `main`. There is no automatic deployment or installer publication yet.
+
 ## Modules
 
 | Module | Responsibility |
@@ -68,4 +74,5 @@ Balances use decimal money, not floating point. Rates normalize to hourly values
 ## Original specification
 
 The full product specification was supplied in the project discussion. This README captures the product boundary and starting architecture; detailed alert thresholds, telemetry transport, persistence schema, acceptance cases, and release criteria will be implemented in their respective milestones.
-# creditwatch
+
+# CreditWatch
