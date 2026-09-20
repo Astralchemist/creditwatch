@@ -9,19 +9,26 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 - [x] Decimal balance, known burn, raw runway, and safe runway calculations
 - [x] Local Keychain credential storage on macOS
 - [x] Polling, stale state, backoff, and bounded SQLite history
-- [x] Menu bar quick view and searchable providers/actions
+- [x] Menu bar quick view as the only window; search removed with the dashboard it navigated
 - [x] Low-runway rule with persisted deduplication and tray notifications
 - [ ] Verify account, billing, and stopped-instance behavior against a real Vast account ([#1](https://github.com/Astralchemist/creditwatch/issues/1))
+  - [x] Account and billing reads verified live: paths need trailing slashes, and the spendable
+    figure is `credit`, not the `balance` the account schema documents
+  - [ ] Stopped-instance behavior still unverified
 - [x] Implement Windows Credential Manager and Linux Secret Service stores ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
 - [ ] Verify Windows ARM64 and x64 runtime compatibility before claiming Windows support ([#9](https://github.com/Astralchemist/creditwatch/issues/9))
 - [ ] Verify notifications and tray behavior on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
 - [ ] CI passes on macOS, Windows, and Linux ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
 - [ ] Test native installers and application restart on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
+  - [x] macOS bundle builds with its own bundle id and icon, which notifications depend on
+  - [ ] Dmg, Msi and Deb packaging untested
 - [ ] Complete the manual acceptance cases in the build specification
 
-## 0.2.0 — dashboard and efficiency
+## 0.2.0 — telemetry and efficiency
 
-- [ ] Configurable 3 × 4 dashboard with saved layout ([#5](https://github.com/Astralchemist/creditwatch/issues/5))
+- [ ] Decide the fate of [#5](https://github.com/Astralchemist/creditwatch/issues/5), the
+  configurable 3 × 4 dashboard: the dashboard window it extended has been removed in favour of
+  the popover, so the issue as written no longer has a surface to live on
 - [ ] Burn-spike alerts ([#6](https://github.com/Astralchemist/creditwatch/issues/6))
 - [ ] Optional Linux telemetry prototype ([#7](https://github.com/Astralchemist/creditwatch/issues/7))
 - [ ] Transparent idle and low-GPU recommendations ([#8](https://github.com/Astralchemist/creditwatch/issues/8))
