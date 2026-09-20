@@ -12,7 +12,8 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 - [x] Menu bar quick view and searchable providers/actions
 - [x] Low-runway rule with persisted deduplication and tray notifications
 - [ ] Verify account, billing, and stopped-instance behavior against a real Vast account ([#1](https://github.com/Astralchemist/creditwatch/issues/1))
-- [ ] Add Windows and Linux secure credential stores before claiming support there ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
+- [x] Implement Windows Credential Manager and Linux Secret Service stores ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
+- [ ] Verify Windows ARM64 and x64 runtime compatibility before claiming Windows support ([#9](https://github.com/Astralchemist/creditwatch/issues/9))
 - [ ] Verify notifications and tray behavior on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
 - [ ] CI passes on macOS, Windows, and Linux ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
 - [ ] Test native installers and application restart on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))

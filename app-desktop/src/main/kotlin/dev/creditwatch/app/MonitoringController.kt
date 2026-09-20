@@ -31,6 +31,7 @@ data class MonitoringState(
     val message: String = "Loading saved account…",
     val nextSyncAt: Instant? = null,
     val activeRunwayThresholdHours: Int? = null,
+    val trends: CardTrends = CardTrends(),
 )
 
 /** Owns the account session. A single job performs each complete polling cycle. */
@@ -44,7 +45,8 @@ class MonitoringController(
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val mutableState = MutableStateFlow(MonitoringState())
     val state = mutableState.asStateFlow()
-    val secureStorageAvailable: Boolean get() = secrets != null
+    private val storageReady = AtomicBoolean(secrets != null)
+    val secureStorageAvailable: Boolean get() = storageReady.get()
     private val actionPending = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
@@ -70,20 +72,27 @@ class MonitoringController(
                 val restored = try {
                     val last = history.latest()
                     history.prune(clock.instant().minus(Duration.ofHours(72)))
-                    last?.let { calculator.calculate(it, history.since(it.accountId, it.observedAt.minusSeconds(3720))) }
+                    last?.let {
+                        val samples = history.since(it.accountId, it.observedAt.minusSeconds(3720))
+                        calculator.calculate(it, samples) to buildCardTrends(samples + it)
+                    }
                 } catch (_: Exception) { null }
-                mutableState.value = MonitoringState(connected = true, busy = false, summary = restored,
+                mutableState.value = MonitoringState(connected = true, busy = false,
+                    summary = restored?.first, trends = restored?.second ?: CardTrends(),
                     stale = true, message = "Showing saved data. Refreshing…")
                 beginPolling()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) {
-                mutableState.value = MonitoringState(busy = false, message = "Could not load the saved key securely.")
+            catch (failure: Exception) {
+                if (failure is SecureStorageUnavailableException) storageReady.set(false)
+                mutableState.value = MonitoringState(busy = false, message =
+                    if (failure is SecureStorageUnavailableException) failure.message!!
+                    else "Could not load the saved key securely.")
             }
         }
     }
 
     fun connect(key: CharArray): Job? {
-        if (state.value.busy || state.value.connected || secrets == null || !actionPending.compareAndSet(false, true)) {
+        if (state.value.busy || state.value.connected || !secureStorageAvailable || !actionPending.compareAndSet(false, true)) {
             key.fill('\u0000')
             return null
         }
@@ -92,12 +101,13 @@ class MonitoringController(
             try {
                 val candidate = providerFactory(String(key))
                 val account = candidate.getAccountSnapshot()
-                secrets.put(SECRET_ID, key)
+                requireNotNull(secrets).put(SECRET_ID, key)
                 provider = candidate
                 mutableState.value = MonitoringState(connected = true, busy = false, message = "Connected. Loading instances…")
                 beginPolling(account)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
+                if (failure is SecureStorageUnavailableException) storageReady.set(false)
                 mutableState.value = MonitoringState(busy = false, message = failureMessage(failure))
             } finally {
                 key.fill('\u0000')
@@ -180,6 +190,7 @@ class MonitoringController(
                     catch (_: Exception) { storageFailed = true }
                     mutableState.value = MonitoringState(
                         connected = true, busy = false, summary = summary, stale = oldBalance,
+                        trends = buildCardTrends(prior + sample),
                         status = if (storageFailed || incomplete) SyncStatus.DEGRADED else SyncStatus.HEALTHY,
                         activeRunwayThresholdHours = alert.state.activeThresholdHours,
                         message = when {
@@ -227,6 +238,7 @@ class MonitoringController(
         is VastFailure.RateLimited -> "Vast.ai rate limit reached. Waiting before retrying."
         VastFailure.InvalidResponse -> "Vast.ai returned incomplete or unreadable data. Retrying automatically."
         VastFailure.Unavailable -> "Vast.ai is unavailable. Retrying automatically."
+        is SecureStorageUnavailableException -> failure.message!!
         else -> "Could not complete the operation. Check secure storage and connectivity."
     }
 

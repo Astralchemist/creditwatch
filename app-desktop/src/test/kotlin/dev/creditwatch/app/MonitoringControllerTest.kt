@@ -13,6 +13,24 @@ import kotlin.test.*
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MonitoringControllerTest {
+    @Test fun unavailableSecureStorageBlocksConnection(): Unit = runTest {
+        val secrets = object : SecretStore {
+            override suspend fun get(id: String): CharArray? = throw SecureStorageUnavailableException("Keyring unavailable")
+            override suspend fun put(id: String, value: CharArray) = error("Must not save")
+            override suspend fun delete(id: String) = error("Must not delete")
+        }
+        val clock = Clock.fixed(Instant.parse("2026-09-19T12:00:00Z"), ZoneOffset.UTC)
+        val controller = MonitoringController(secrets, MemoryHistory(), { FakeProvider(clock) },
+            clock, StandardTestDispatcher(testScheduler))
+        controller.start(); runCurrent()
+        assertFalse(controller.secureStorageAvailable)
+        assertEquals("Keyring unavailable", controller.state.value.message)
+        val key = "test".toCharArray()
+        assertNull(controller.connect(key))
+        assertTrue(key.all { it == '\u0000' })
+        controller.stop()
+    }
+
     @Test fun pollingNeverOverlapsAndManualRequestsDuringSyncAreCoalesced(): Unit = runTest {
         val f = fixture()
         f.provider.instanceDelay = 75_000
