@@ -1,7 +1,6 @@
 package dev.creditwatch.app
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -21,11 +20,9 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.Path as GraphicsPath
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
@@ -248,8 +245,8 @@ private fun PaneHeader(state: MonitoringState, onSettings: () -> Unit, onClose: 
         Spacer(Modifier.width(8.dp))
         Text(statusLabel(state), color = statusTone(state), fontSize = 12.sp, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        IconAction("⋯", "Settings", onSettings)
-        IconAction("×", "Close", onClose)
+        IconAction(CwIcons.Settings, "Settings", onSettings)
+        IconAction(CwIcons.Close, "Close", onClose)
     }
 }
 
@@ -270,6 +267,9 @@ private fun ColumnScope.RunwayPane(
                 Caption("SAFE RUNWAY")
                 Spacer(Modifier.weight(1f))
                 state.activeRunwayThresholdHours?.let {
+                    Icon(CwIcons.Alert, contentDescription = null, tint = amber,
+                        modifier = Modifier.size(11.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text("below ${it}h", color = amber, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
             }
@@ -280,7 +280,8 @@ private fun ColumnScope.RunwayPane(
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCell("BALANCE", balanceText(state), state.trends.balance, healthy, Modifier.weight(1f))
+            MetricCell("BALANCE", balanceText(state), state.trends.balance, healthy, Modifier.weight(1f),
+                projection = balanceProjection(state))
             MetricCell("KNOWN BURN", burnCompact(state), state.trends.burn, accent, Modifier.weight(1f))
         }
 
@@ -305,7 +306,7 @@ private fun ColumnScope.RunwayPane(
     Row(Modifier.fillMaxWidth().padding(top = 11.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(footerText(state, closing), color = if (state.stale) amber else muted,
             fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, modifier = Modifier.weight(1f))
-        IconAction("↻", "Refresh now", controller::refreshNow, enabled = state.canRefresh && !closing)
+        IconAction(CwIcons.Refresh, "Refresh now", controller::refreshNow, enabled = state.canRefresh && !closing)
     }
 }
 
@@ -332,13 +333,17 @@ private fun ColumnScope.ConnectPane(
             enabled = !state.busy && !closing && controller.secureStorageAvailable,
             modifier = Modifier.fillMaxWidth(),
         )
-        Text("Where to find your key ↗", color = accent, fontSize = 11.sp,
-            textDecoration = TextDecoration.Underline,
-            modifier = Modifier.clickable {
-                linkFailed = runCatching {
-                    uriHandler.openUri("https://docs.vast.ai/guides/reference/keys")
-                }.isFailure
-            })
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
+            linkFailed = runCatching {
+                uriHandler.openUri("https://docs.vast.ai/guides/reference/keys")
+            }.isFailure
+        }) {
+            Text("Where to find your key", color = accent, fontSize = 11.sp,
+                textDecoration = TextDecoration.Underline)
+            Spacer(Modifier.width(5.dp))
+            Icon(CwIcons.ExternalLink, contentDescription = null, tint = accent,
+                modifier = Modifier.size(11.dp))
+        }
         if (linkFailed) {
             Text("Open docs.vast.ai/guides/reference/keys in your browser.", color = amber, fontSize = 11.sp)
         }
@@ -362,7 +367,7 @@ private fun ColumnScope.SettingsPane(
     onBack: () -> Unit, themeMode: ThemeMode, onThemeChange: (ThemeMode) -> Unit, onQuit: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        IconAction("‹", "Back to runway", onBack)
+        IconAction(CwIcons.ChevronLeft, "Back to runway", onBack)
         Spacer(Modifier.width(4.dp))
         Text("Settings", color = white, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -440,13 +445,17 @@ private fun ColumnScope.SettingsPane(
 }
 
 @Composable
-private fun MetricCell(label: String, value: String, trend: CardTrend, tone: Color, modifier: Modifier) {
+private fun MetricCell(
+    label: String, value: String, trend: CardTrend, tone: Color, modifier: Modifier,
+    projection: TrendPoint? = null,
+) {
     Column(modifier.background(panel, RoundedCornerShape(12.dp))
         .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Caption(label)
         Text(value, color = white, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        TrendGraph(trend, Modifier.fillMaxWidth().height(14.dp), tone)
+        Sparkline(trend, tone, Modifier.fillMaxWidth().height(20.dp),
+            projection = projection, emptyColor = muted)
     }
 }
 
@@ -477,48 +486,11 @@ private fun InstanceRow(instance: CloudInstance) {
 }
 
 @Composable
-private fun IconAction(glyph: String, description: String, onClick: () -> Unit, enabled: Boolean = true) {
+private fun IconAction(icon: ImageVector, description: String, onClick: () -> Unit, enabled: Boolean = true) {
     TextButton(onClick = onClick, enabled = enabled,
-        modifier = Modifier.size(32.dp).semantics { contentDescription = description },
-        contentPadding = PaddingValues(0.dp)) {
-        Text(glyph, color = muted.copy(alpha = if (enabled) 1f else .35f), fontSize = 17.sp)
-    }
-}
-
-@Composable
-private fun TrendGraph(trend: CardTrend, modifier: Modifier = Modifier, color: Color? = null) {
-    val lineColor = color ?: accent
-    val points = remember(trend) { trend.points.mapNotNull { point ->
-        point.value.toFloat().takeIf(Float::isFinite)?.let { point.time to it }
-    } }
-    if (points.size < 2) {
-        Box(modifier, contentAlignment = Alignment.CenterStart) {
-            Text("—", color = muted, fontSize = 12.sp)
-        }
-        return
-    }
-    Canvas(modifier) {
-        val minTime = points.first().first.toEpochMilli()
-        val span = (points.last().first.toEpochMilli() - minTime).coerceAtLeast(1).toFloat()
-        val low = points.minOf { it.second }
-        val high = points.maxOf { it.second }
-        val spread = (high - low).takeIf { it > 0f } ?: 1f
-        val path = GraphicsPath()
-        var previousTime: Instant? = null
-        points.forEachIndexed { index, (time, value) ->
-            val x = (time.toEpochMilli() - minTime) / span * size.width
-            val y = if (high == low) size.height / 2f else
-                size.height - 3.dp.toPx() - ((value - low) / spread * (size.height - 6.dp.toPx()))
-            if (index == 0 || previousTime?.let { java.time.Duration.between(it, time).seconds > 180 } == true)
-                path.moveTo(x, y) else path.lineTo(x, y)
-            previousTime = time
-        }
-        drawPath(path, lineColor, style = Stroke(width = 1.5.dp.toPx()))
-        val last = points.last()
-        val lastX = (last.first.toEpochMilli() - minTime) / span * size.width
-        val lastY = if (high == low) size.height / 2f else
-            size.height - 3.dp.toPx() - ((last.second - low) / spread * (size.height - 6.dp.toPx()))
-        drawCircle(lineColor, radius = 2.dp.toPx(), center = Offset(lastX, lastY))
+        modifier = Modifier.size(32.dp), contentPadding = PaddingValues(0.dp)) {
+        Icon(icon, contentDescription = description, modifier = Modifier.size(16.dp),
+            tint = muted.copy(alpha = if (enabled) 1f else .35f))
     }
 }
 
@@ -544,6 +516,13 @@ private fun statusTone(state: MonitoringState): Color = when {
     state.connected && (state.stale || state.status == SyncStatus.DEGRADED) -> amber
     state.connected && state.status in setOf(SyncStatus.HEALTHY, SyncStatus.SYNCING) -> healthy
     else -> muted
+}
+
+/** Where the balance line is headed: zero, at the moment the raw runway runs out. */
+private fun balanceProjection(state: MonitoringState): TrendPoint? {
+    val summary = state.summary ?: return null
+    val runway = summary.rawRunway as? RunwayResult.Available ?: return null
+    return TrendPoint(summary.sample.observedAt.plus(runway.duration), BigDecimal.ZERO)
 }
 
 private fun balanceText(state: MonitoringState) =

@@ -76,7 +76,7 @@ class MonitoringController(
                     val last = history.latest()
                     history.prune(clock.instant().minus(Duration.ofHours(72)))
                     last?.let {
-                        val samples = history.since(it.accountId, it.observedAt.minusSeconds(3720))
+                        val samples = history.since(it.accountId, it.observedAt.minus(HISTORY_WINDOW))
                         calculator.calculate(it, samples) to buildCardTrends(samples + it)
                     }
                 } catch (_: Exception) { null }
@@ -183,7 +183,7 @@ class MonitoringController(
                     val burn = BurnCalculator().calculate(account.accountId, account.balance.currency, instances, now)
                     val sample = MonitoringSample(account.accountId, now, account.observedAt, account.balance, burn.knownRate, burn.unknownCosts)
                     var storageFailed = false
-                    val prior = try { history.since(sample.accountId, now.minusSeconds(3720)) }
+                    val prior = try { history.since(sample.accountId, now.minus(HISTORY_WINDOW)) }
                         catch (_: Exception) { storageFailed = true; emptyList() }
                     val summary = calculator.calculate(sample, prior)
                     try {
@@ -266,6 +266,9 @@ class MonitoringController(
 
     companion object {
         private const val SECRET_ID = "vast-default"
+
+        /** Covers the chart window plus the slack the one-hour burn average needs at its edge. */
+        private val HISTORY_WINDOW: Duration = TREND_WINDOW.plusMinutes(2)
         internal fun backoff(failures: Int): Duration =
             Duration.ofSeconds(if (failures <= 1) 60 else minOf(900L, 60L * (1L shl (failures - 1).coerceAtMost(4))))
     }

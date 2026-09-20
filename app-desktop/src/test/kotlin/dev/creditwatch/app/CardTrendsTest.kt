@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class CardTrendsTest {
     private val usd = CurrencyCode("USD")
@@ -19,8 +18,9 @@ class CardTrendsTest {
         assertEquals(BigDecimal("-10.0"), trends.balance.changePercent)
         assertEquals(BigDecimal("100.0"), trends.burn.changePercent)
         assertEquals(1, trends.balance.minutes)
-        assertEquals(2, trends.runway.points.size)
-        assertTrue(trends.runway.changePercent!! < BigDecimal.ZERO)
+        // A rate holds until an instance changes, so the burn line must not be interpolated.
+        assertEquals(Interpolation.STEP, trends.burn.interpolation)
+        assertEquals(Interpolation.LINEAR, trends.balance.interpolation)
     }
 
     @Test fun unavailableBillingAndStaleBalanceDoNotCreateFalseTrends() {
@@ -30,7 +30,6 @@ class CardTrendsTest {
         val trends = buildCardTrends(listOf(old, stale))
         assertEquals(1, trends.balance.points.size)
         assertEquals(1, trends.burn.points.size)
-        assertEquals(1, trends.runway.points.size)
         assertEquals(null, trends.balance.changePercent)
     }
 
