@@ -5,7 +5,7 @@ import dev.creditwatch.domain.CostType
 import dev.creditwatch.engine.BurnCalculator
 import dev.creditwatch.engine.RunwayCalculator
 import dev.creditwatch.engine.RunwayResult
-import dev.creditwatch.provider.CredentialValidation
+import dev.creditwatch.provider.ProviderFailure
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -40,7 +40,7 @@ class VastProviderTest {
             }
         }
         try {
-            val provider = VastProvider(client, "sample-key", clock)
+            val provider = VastProvider(client, "sample-key".toCharArray(), clock)
             val account = provider.getAccountSnapshot()
             val instances = provider.getInstances()
 
@@ -62,9 +62,9 @@ class VastProviderTest {
     fun unauthorizedIsReportedWithoutResponseBody(): Unit = runBlocking {
         val client = mockClient { _ -> respond("sensitive body", HttpStatusCode.Unauthorized) }
         try {
-            val provider = VastProvider(client, "sample-key", clock)
-            assertEquals(CredentialValidation.Invalid, provider.validateCredentials())
-            assertFailsWith<VastFailure.Unauthorized> { provider.getAccountSnapshot() }
+            val provider = VastProvider(client, "sample-key".toCharArray(), clock)
+            val failure = assertFailsWith<ProviderFailure.Unauthorized> { provider.getAccountSnapshot() }
+            assertEquals("The provider rejected the API key", failure.message)
         } finally { client.close() }
     }
 
@@ -72,8 +72,8 @@ class VastProviderTest {
     fun malformedAccountDoesNotBecomeZeroBalance(): Unit = runBlocking {
         val client = mockClient { _ -> respond("{\"id\":42}") }
         try {
-            assertFailsWith<VastFailure.InvalidResponse> {
-                VastProvider(client, "sample-key", clock).getAccountSnapshot()
+            assertFailsWith<ProviderFailure.InvalidResponse> {
+                VastProvider(client, "sample-key".toCharArray(), clock).getAccountSnapshot()
             }
         } finally { client.close() }
     }
@@ -83,10 +83,47 @@ class VastProviderTest {
         val client = mockClient { _ -> respond("too many", HttpStatusCode.TooManyRequests,
             headersOf(HttpHeaders.RetryAfter, "120")) }
         try {
-            val failure = assertFailsWith<VastFailure.RateLimited> {
-                VastProvider(client, "sample-key", clock).getAccountSnapshot()
+            val failure = assertFailsWith<ProviderFailure.RateLimited> {
+                VastProvider(client, "sample-key".toCharArray(), clock).getAccountSnapshot()
             }
             assertEquals(java.time.Duration.ofSeconds(120), failure.retryAfter)
+        } finally { client.close() }
+    }
+
+    @Test
+    fun repeatedPaginationTokenIsRejected(): Unit = runBlocking {
+        val looping = "{\"success\":true,\"instances\":[],\"next_token\":\"same\"}"
+        val client = mockClient { _ -> respond(looping) }
+        try {
+            assertFailsWith<ProviderFailure.InvalidResponse> {
+                VastProvider(client, "sample-key".toCharArray(), clock).getInstances()
+            }
+        } finally { client.close() }
+    }
+
+    @Test
+    fun oversizedBodyIsRejectedBeforeItIsBuffered(): Unit = runBlocking {
+        val client = mockClient { _ -> respond("{\"id\":42,\"balance\":\"" + "9".repeat(1_000_001) + "\"}") }
+        try {
+            assertFailsWith<ProviderFailure.InvalidResponse> {
+                VastProvider(client, "sample-key".toCharArray(), clock).getAccountSnapshot()
+            }
+        } finally { client.close() }
+    }
+
+    @Test
+    fun theKeyIsCopiedOnConstructionAndCanBeErased(): Unit = runBlocking {
+        val key = "sample-key".toCharArray()
+        val client = mockClient { request ->
+            assertEquals("Bearer sample-key", request.headers[HttpHeaders.Authorization])
+            respond(fixture("user.json"))
+        }
+        try {
+            val provider = VastProvider(client, key, clock)
+            key.fill('\u0000')
+            assertEquals(BigDecimal("24.18"), provider.getAccountSnapshot().balance.amount)
+            provider.eraseCredential()
+            assertFailsWith<IllegalStateException> { provider.getAccountSnapshot() }
         } finally { client.close() }
     }
 

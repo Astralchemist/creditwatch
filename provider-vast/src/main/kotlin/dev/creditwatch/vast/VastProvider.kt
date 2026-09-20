@@ -2,8 +2,8 @@ package dev.creditwatch.vast
 
 import dev.creditwatch.domain.*
 import dev.creditwatch.provider.CloudProvider
-import dev.creditwatch.provider.CredentialValidation
 import dev.creditwatch.provider.ProviderCapabilities
+import dev.creditwatch.provider.ProviderFailure
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -27,24 +27,20 @@ import java.time.Duration
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-sealed class VastFailure(message: String) : RuntimeException(message) {
-    data object Unauthorized : VastFailure("Vast.ai rejected the API key")
-    data class RateLimited(val retryAfter: Duration? = null) : VastFailure("Vast.ai rate limit reached")
-    data object Unavailable : VastFailure("Vast.ai is unavailable")
-    data object InvalidResponse : VastFailure("Vast.ai returned an unexpected response")
-}
-
 class VastProvider(
     private val client: HttpClient,
-    private val apiKey: String,
+    apiKey: CharArray,
     private val clock: Clock = Clock.systemUTC(),
     private val baseUrl: String = "https://console.vast.ai",
 ) : CloudProvider {
+    /** Owned copy, so the caller can wipe its buffer as soon as the provider is built. */
+    private val apiKey = apiKey.copyOf()
+
     init {
         val uri = URI(baseUrl)
         require(uri.scheme == "https" || (uri.scheme == "http" && uri.host in setOf("localhost", "127.0.0.1")))
         require(uri.userInfo == null && uri.query == null && uri.fragment == null)
-        require(apiKey.isNotBlank())
+        require(this.apiKey.any { !it.isWhitespace() && it != '\u0000' })
     }
 
     override val id = ProviderId("vast")
@@ -52,17 +48,10 @@ class VastProvider(
     private val json = Json { ignoreUnknownKeys = true }
     private val usd = CurrencyCode("USD")
 
-    override suspend fun validateCredentials(): CredentialValidation = try {
-        getAccountSnapshot()
-        CredentialValidation.Valid
-    } catch (_: VastFailure.Unauthorized) {
-        CredentialValidation.Invalid
-    }
-
     override suspend fun getAccountSnapshot(): BalanceSnapshot {
         val body = request("/api/v0/users/current")
         val user = decode<UserDto>(body)
-        val balance = user.balance?.decimal() ?: throw VastFailure.InvalidResponse
+        val balance = user.balance?.decimal() ?: throw ProviderFailure.InvalidResponse
         return BalanceSnapshot(AccountId("vast:${user.id}"), Money(balance, usd), clock.instant())
     }
 
@@ -74,13 +63,13 @@ class VastProvider(
             val path = if (nextToken == null) "/api/v1/instances?limit=25"
                 else "/api/v1/instances?limit=25&after_token=${java.net.URLEncoder.encode(nextToken, Charsets.UTF_8)}"
             val page = decode<InstancesPageDto>(request(path))
-            if (page.success != true) throw VastFailure.InvalidResponse
+            if (page.success != true) throw ProviderFailure.InvalidResponse
             instances += page.instances.map(::mapInstance)
             val token = page.nextToken?.takeIf(String::isNotBlank) ?: return instances
-            if (!seenTokens.add(token)) throw VastFailure.InvalidResponse
+            if (!seenTokens.add(token)) throw ProviderFailure.InvalidResponse
             nextToken = token
         }
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     private fun mapInstance(dto: InstanceDto): CloudInstance {
@@ -99,16 +88,25 @@ class VastProvider(
         )
     }
 
+    override fun eraseCredential() = apiKey.fill('\u0000')
+
+    /** Built per request so no long-lived [String] copy of the key is retained by this adapter. */
+    private fun authorization(): String {
+        check(apiKey.any { it != '\u0000' }) { "The Vast.ai credential has been erased" }
+        return "Bearer " + String(apiKey)
+    }
+
     private suspend fun request(path: String): String {
+        val credential = authorization()
         try {
             return client.prepareGet(baseUrl + path) {
-                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                header(HttpHeaders.Authorization, credential)
             }.execute { response ->
             when (response.status) {
                 HttpStatusCode.OK -> Unit
-                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw VastFailure.Unauthorized
-                HttpStatusCode.TooManyRequests -> throw VastFailure.RateLimited(retryAfter(response.headers[HttpHeaders.RetryAfter]))
-                else -> throw VastFailure.Unavailable
+                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw ProviderFailure.Unauthorized
+                HttpStatusCode.TooManyRequests -> throw ProviderFailure.RateLimited(retryAfter(response.headers[HttpHeaders.RetryAfter]))
+                else -> throw ProviderFailure.Unavailable
             }
             val channel = response.bodyAsChannel()
             val bytes = ByteArrayOutputStream()
@@ -116,17 +114,17 @@ class VastProvider(
             while (true) {
                 val count = channel.readAvailable(chunk, 0, chunk.size)
                 if (count < 0) break
-                if (bytes.size() + count > 1_000_000) throw VastFailure.InvalidResponse
+                if (bytes.size() + count > 1_000_000) throw ProviderFailure.InvalidResponse
                 bytes.write(chunk, 0, count)
             }
             bytes.toString(StandardCharsets.UTF_8)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: VastFailure) {
+        } catch (failure: ProviderFailure) {
             throw failure
         } catch (_: Exception) {
-            throw VastFailure.Unavailable
+            throw ProviderFailure.Unavailable
         }
     }
 
@@ -142,13 +140,13 @@ class VastProvider(
     private inline fun <reified T> decode(body: String): T = try {
         json.decodeFromString<T>(body)
     } catch (_: Exception) {
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     private fun JsonPrimitive.decimal(): BigDecimal = try {
         BigDecimal(content)
     } catch (_: NumberFormatException) {
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     companion object {

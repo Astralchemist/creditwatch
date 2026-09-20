@@ -77,4 +77,3 @@ Balances use decimal money, not floating point. Rates normalize to hourly values
 
 The full product specification was supplied in the project discussion. This README captures the product boundary and starting architecture; detailed alert thresholds, telemetry transport, persistence schema, acceptance cases, and release criteria will be implemented in their respective milestones.
 
-# CreditWatch

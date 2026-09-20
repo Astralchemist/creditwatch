@@ -66,6 +66,9 @@ private val searchShortcut = if (System.getProperty("os.name").startsWith("Mac")
 private val searchableProviders = listOf(ProviderSearchItem("vast", "Vast.ai", "cloud account gpu credits"))
 private enum class DashboardPage { OVERVIEW, PROVIDER }
 
+/** Mirrors [MonitoringController.refreshNow]: during a backoff the request is dropped, so don't offer it. */
+private val MonitoringState.canRefresh: Boolean get() = connected && !busy && !backingOff
+
 fun main() = application {
     val http = remember { VastProvider.newHttpClient() }
     val controller = remember {
@@ -146,7 +149,7 @@ fun main() = application {
                 Item("Show quick view", onClick = showQuickFromTray)
                 Item("Open dashboard", onClick = openDashboard)
                 Item("Search providers and actions", onClick = openSearch)
-                Item("Refresh now", enabled = state.connected && !state.busy, onClick = controller::refreshNow)
+                Item("Refresh now", enabled = state.canRefresh, onClick = controller::refreshNow)
                 Separator()
                 Item("Theme: ${themeMode.label}", onClick = {
                     setTheme(ThemeMode.entries[(themeMode.ordinal + 1) % ThemeMode.entries.size])
@@ -322,7 +325,7 @@ private fun QuickView(
             TextButton(onClick = { onThemeChange(if (isDark) ThemeMode.LIGHT else ThemeMode.DARK) }) {
                 Text(if (isDark) "☀" else "☾", color = accent, fontSize = 18.sp)
             }
-            TextButton(onClick = onRefresh, enabled = state.connected && !state.busy) {
+            TextButton(onClick = onRefresh, enabled = state.canRefresh) {
                 Text("↻", fontSize = 19.sp)
             }
         }
@@ -431,8 +434,7 @@ private fun OverviewContent(
                     fontWeight = FontWeight.SemiBold)
             }
             if (state.connected) {
-                Button(onClick = controller::refreshNow, enabled = !state.busy && !closing &&
-                    state.status !in setOf(SyncStatus.AUTH_ERROR, SyncStatus.RATE_LIMITED)) {
+                Button(onClick = controller::refreshNow, enabled = state.canRefresh && !closing) {
                     Text(if (state.busy) "Refreshing…" else "↻  Refresh now")
                 }
             }
@@ -592,7 +594,7 @@ private fun ConnectionView(
             if (linkFailed) Text("Open docs.vast.ai/guides/reference/keys in your browser.",
                 color = amber, fontSize = 12.sp)
             Text(state.message, color = if (state.status == SyncStatus.AUTH_ERROR) amber else muted, fontSize = 12.sp)
-            Button(onClick = { controller.connect(key.trim().toCharArray()); key = "" },
+            Button(onClick = { if (controller.connect(key.trim().toCharArray()) != null) key = "" },
                 enabled = !state.busy && !closing && controller.secureStorageAvailable && key.isNotBlank()) {
                 Text("Connect account")
             }
@@ -657,11 +659,11 @@ private fun ProviderSearchBar(entries: List<SearchEntry>, requestId: Int, onSele
 @Composable private fun ProviderStatus(state: MonitoringState) {
     val live = state.connected && !state.stale && state.status in setOf(SyncStatus.HEALTHY, SyncStatus.DEGRADED)
     val label = when {
+        state.status == SyncStatus.CONNECTING -> "Connecting"
+        state.status == SyncStatus.AUTH_ERROR -> "Key rejected"
         !state.connected && state.busy -> "Loading account"
         !state.connected -> "Not connected"
-        state.status == SyncStatus.CONNECTING -> "Connecting"
         state.status == SyncStatus.SYNCING -> "Syncing"
-        state.status == SyncStatus.AUTH_ERROR -> "Key rejected"
         state.status == SyncStatus.RATE_LIMITED -> "Rate limited"
         state.status == SyncStatus.OFFLINE -> "Offline"
         state.status == SyncStatus.DEGRADED -> "Partial data"
