@@ -11,18 +11,19 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 - [x] Polling, stale state, backoff, and bounded SQLite history
 - [x] Menu bar quick view and searchable providers/actions
 - [x] Low-runway rule with persisted deduplication and tray notifications
-- [ ] Verify account, billing, and stopped-instance behavior against a real Vast account
-- [ ] Add Windows and Linux secure credential stores before claiming support there
-- [ ] Verify notifications and tray behavior on each supported OS
-- [ ] Test native installers and application restart on each supported OS
+- [ ] Verify account, billing, and stopped-instance behavior against a real Vast account ([#1](https://github.com/Astralchemist/creditwatch/issues/1))
+- [ ] Add Windows and Linux secure credential stores before claiming support there ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
+- [ ] Verify notifications and tray behavior on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
+- [ ] CI passes on macOS, Windows, and Linux ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
+- [ ] Test native installers and application restart on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
 - [ ] Complete the manual acceptance cases in the build specification
 
 ## 0.2.0 — dashboard and efficiency
 
-- [ ] Configurable 3 × 4 dashboard with saved layout
-- [ ] Burn-spike alerts
-- [ ] Optional Linux telemetry prototype
-- [ ] Transparent idle and low-GPU recommendations
+- [ ] Configurable 3 × 4 dashboard with saved layout ([#5](https://github.com/Astralchemist/creditwatch/issues/5))
+- [ ] Burn-spike alerts ([#6](https://github.com/Astralchemist/creditwatch/issues/6))
+- [ ] Optional Linux telemetry prototype ([#7](https://github.com/Astralchemist/creditwatch/issues/7))
+- [ ] Transparent idle and low-GPU recommendations ([#8](https://github.com/Astralchemist/creditwatch/issues/8))
 
 ## Release rule
 

@@ -35,7 +35,7 @@ On this Mac, Homebrew installed JDK 21 at `/opt/homebrew/opt/openjdk@21/libexec/
 
 CreditWatch is a Kotlin/JVM desktop application. It reads Vast.ai through the provider API using a locally stored key. Users will install a native desktop package when packaging is ready; npm and Bun packages are not part of the product.
 
-The planned app version is set once in `gradle.properties`. [Roadmap](ROADMAP.md) tracks release gates, [changelog](CHANGELOG.md) records shipped changes, and [development flow](CONTRIBUTING.md) defines issue, pull request, and release checks. GitHub Actions runs tests and desktop compilation on macOS, Windows, and Linux for pull requests and changes to `main`. There is no automatic deployment or installer publication yet.
+The planned app version is set once in `gradle.properties`. [Roadmap](ROADMAP.md) tracks release gates, [changelog](CHANGELOG.md) records shipped changes, and [development flow](CONTRIBUTING.md) defines issue, pull request, and release checks. GitHub Actions is configured to test and compile on macOS, Windows, and Linux for pull requests and changes to `main`. There is no automatic deployment or installer publication yet.
 
 ## Modules
 
