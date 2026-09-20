@@ -26,6 +26,7 @@ data class MonitoringState(
     val connected: Boolean = false,
     val busy: Boolean = true,
     val summary: MonitoringSummary? = null,
+    val instances: List<CloudInstance> = emptyList(),
     val stale: Boolean = true,
     val status: SyncStatus = SyncStatus.DISCONNECTED,
     val message: String = "Loading saved account…",
@@ -190,6 +191,7 @@ class MonitoringController(
                     catch (_: Exception) { storageFailed = true }
                     mutableState.value = MonitoringState(
                         connected = true, busy = false, summary = summary, stale = oldBalance,
+                        instances = instances,
                         trends = buildCardTrends(prior + sample),
                         status = if (storageFailed || incomplete) SyncStatus.DEGRADED else SyncStatus.HEALTHY,
                         activeRunwayThresholdHours = alert.state.activeThresholdHours,

@@ -10,5 +10,7 @@
 - One-hour trends in dashboard cards and the menu bar view
 - Saved System, Dark, and Light appearance, inline provider/action search, and provider connection guidance
 - Linux ARM64 JDK 21 build and live Secret Service round-trip verification; Windows runtime verification remains open
+- Compact menu bar view anchored beneath the tray icon, a clearer runway-first dashboard, and running instance rows from provider data
+- Windows credential memory is wiped and closed immediately after a key is saved
 
 No version has been released yet.

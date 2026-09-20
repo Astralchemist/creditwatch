@@ -16,6 +16,7 @@ class WindowsCredentialsTest {
         WindowsCredentials store = new WindowsCredentials(api);
         byte[] key = "test-secret".getBytes(StandardCharsets.UTF_8);
         store.put("dev.creditwatch.vast.api-key/vast-default", key);
+        assertFalse(api.writtenBlob.valid());
         assertEquals(1, api.savedType);
         assertEquals(2, api.savedPersistence);
         assertEquals("dev.creditwatch.vast.api-key/vast-default", api.target);
@@ -35,8 +36,10 @@ class WindowsCredentialsTest {
         boolean freed;
         WindowsCredentials.Credential result;
         Memory blob;
+        Memory writtenBlob;
 
         public boolean CredWrite(WindowsCredentials.Credential credential, int flags) {
+            writtenBlob = (Memory) credential.blob;
             target = credential.targetName.toString();
             savedType = credential.type;
             savedPersistence = credential.persist;
@@ -67,7 +70,11 @@ class WindowsCredentialsTest {
 
         public void CredFree(Pointer pointer) {
             freed = true;
-            blob.clear();
+            try {
+                blob.clear();
+            } finally {
+                blob.close();
+            }
         }
     }
 }

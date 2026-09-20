@@ -55,9 +55,11 @@ class MonitoringControllerTest {
         val f = fixture()
         f.controller.start(); runCurrent()
         val original = f.controller.state.value.summary
+        assertEquals(listOf("1"), f.controller.state.value.instances.map { it.id.value })
         f.provider.failure = VastFailure.Unavailable
         advanceTimeBy(60_000); runCurrent()
         assertEquals(original, f.controller.state.value.summary)
+        assertEquals(listOf("1"), f.controller.state.value.instances.map { it.id.value })
         assertTrue(f.controller.state.value.stale)
         assertEquals(SyncStatus.OFFLINE, f.controller.state.value.status)
         advanceTimeBy(60_000); runCurrent()

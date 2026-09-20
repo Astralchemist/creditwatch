@@ -2,6 +2,7 @@ package dev.creditwatch.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -34,10 +35,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.*
 import androidx.compose.ui.window.PopupProperties
 import dev.creditwatch.domain.CurrencyCode
+import dev.creditwatch.domain.CloudInstance
+import dev.creditwatch.domain.InstanceState
 import dev.creditwatch.engine.RunwayResult
 import dev.creditwatch.persistence.SqliteMonitoringHistory
 import dev.creditwatch.vast.VastProvider
 import kotlinx.coroutines.launch
+import java.awt.GraphicsEnvironment
+import java.awt.MouseInfo
+import java.awt.Point
 import java.awt.Toolkit
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -78,8 +84,9 @@ fun main() = application {
     val trayState = rememberTrayState()
     val scope = rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
-    var quick by remember { mutableStateOf(isTraySupported) }
+    var quick by remember { mutableStateOf(false) }
     var dashboard by remember { mutableStateOf(!isTraySupported) }
+    var trayAnchor by remember { mutableStateOf<Point?>(null) }
     var searchRequest by remember { mutableIntStateOf(0) }
     var page by remember { mutableStateOf(DashboardPage.OVERVIEW) }
     var themeMode by remember { mutableStateOf(AppearanceSettings.load()) }
@@ -101,6 +108,11 @@ fun main() = application {
         openDashboard()
         searchRequest++
         Unit
+    }
+    val showQuickFromTray = {
+        trayAnchor = MouseInfo.getPointerInfo()?.location
+        dashboard = false
+        quick = true
     }
     val quit = {
         if (!closing) {
@@ -127,9 +139,11 @@ fun main() = application {
             state = trayState,
             icon = CreditWatchIcon,
             tooltip = "CreditWatch",
-            onAction = { quick = !quick },
+            onAction = {
+                if (quick) quick = false else showQuickFromTray()
+            },
             menu = {
-                Item("Show quick view", onClick = { quick = true; dashboard = false })
+                Item("Show quick view", onClick = showQuickFromTray)
                 Item("Open dashboard", onClick = openDashboard)
                 Item("Search providers and actions", onClick = openSearch)
                 Item("Refresh now", enabled = state.connected && !state.busy, onClick = controller::refreshNow)
@@ -147,14 +161,14 @@ fun main() = application {
         onCloseRequest = { quick = false }, visible = quick && !closing,
         title = "CreditWatch quick view", icon = CreditWatchIcon,
         undecorated = true, transparent = true, resizable = false, alwaysOnTop = true,
-        state = rememberWindowState(width = 360.dp, height = 600.dp),
+        state = rememberWindowState(width = 390.dp, height = 560.dp),
     ) {
-        DisposableEffect(window) {
-            val config = window.graphicsConfiguration
-            val bounds = config.bounds
-            val insets = Toolkit.getDefaultToolkit().getScreenInsets(config)
-            window.setLocation(bounds.x + bounds.width - window.width - 16, bounds.y + insets.top + 8)
-            onDispose { }
+        LaunchedEffect(quick, trayAnchor, window) {
+            if (quick) {
+                positionQuickView(window, trayAnchor)
+                window.toFront()
+                window.requestFocus()
+            }
         }
         CreditWatchTheme(themeMode) {
             QuickView(state, openDashboard, openProvider, openSearch, controller::refreshNow, { quick = false },
@@ -165,7 +179,7 @@ fun main() = application {
     Window(
         onCloseRequest = { if (isTraySupported) dashboard = false else quit() },
         visible = dashboard && !closing, title = "CreditWatch", icon = CreditWatchIcon,
-        state = rememberWindowState(width = 790.dp, height = 620.dp),
+        state = rememberWindowState(width = 980.dp, height = 720.dp),
     ) {
         CreditWatchTheme(themeMode) {
             Dashboard(state, controller, closing, page, openDashboard, openProvider,
@@ -178,6 +192,26 @@ fun main() = application {
                 }, themeMode, setTheme)
         }
     }
+}
+
+private fun positionQuickView(window: java.awt.Window, anchor: Point?) {
+    val config = GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices
+        .map { it.defaultConfiguration }
+        .firstOrNull { anchor != null && it.bounds.contains(anchor) }
+        ?: window.graphicsConfiguration
+    val bounds = config.bounds
+    val insets = Toolkit.getDefaultToolkit().getScreenInsets(config)
+    val left = bounds.x + insets.left + 8
+    val right = (bounds.x + bounds.width - insets.right - window.width - 8).coerceAtLeast(left)
+    val top = bounds.y + insets.top + 8
+    val bottom = (bounds.y + bounds.height - insets.bottom - window.height - 8).coerceAtLeast(top)
+    val x = (anchor?.x?.minus(window.width / 2) ?: right).coerceIn(left, right)
+    val y = when {
+        anchor == null || anchor.y <= top + 48 -> top
+        anchor.y >= bounds.y + bounds.height - insets.bottom - 48 -> bottom
+        else -> (anchor.y + 8).coerceIn(top, bottom)
+    }
+    window.setLocation(x, y)
 }
 
 private object CreditWatchIcon : Painter() {
@@ -223,55 +257,114 @@ private fun QuickView(
     themeMode: ThemeMode, onThemeChange: (ThemeMode) -> Unit,
 ) {
     val isDark = themeMode == ThemeMode.DARK || (themeMode == ThemeMode.SYSTEM && isSystemInDarkTheme())
-    Column(Modifier.fillMaxSize().background(background, RoundedCornerShape(24.dp))
+    val running = state.instances.filter { it.state == InstanceState.RUNNING }
+    Column(Modifier.fillMaxSize().background(background, RoundedCornerShape(20.dp))
+        .border(1.dp, muted.copy(alpha = .25f), RoundedCornerShape(20.dp))
         .onPreviewKeyEvent {
             if (it.type == KeyEventType.KeyDown && it.key == Key.K && (it.isMetaPressed || it.isCtrlPressed)) {
                 onSearch(); true
             } else false
-        }.padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        }.padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            BrandMark()
+            Box(Modifier.size(32.dp).background(accent, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center) {
+                Text("CW", color = background, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
             Spacer(Modifier.width(10.dp))
             Text("CreditWatch", color = white, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { onThemeChange(if (isDark) ThemeMode.LIGHT else ThemeMode.DARK) }) {
-                Text(if (isDark) "☀ Light" else "☾ Dark", color = accent, fontSize = 12.sp)
-            }
             TextButton(onClick = onClose) { Text("×", color = muted, fontSize = 18.sp) }
         }
-        ProviderStatus(state)
-        Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(22.dp)).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Label("SAFE RUNWAY")
-            Text(state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
-                color = if (state.stale) amber else white, fontSize = 35.sp, fontWeight = FontWeight.Medium)
-            if (state.connected) {
-                Text(runwayDetail(state), color = muted, fontSize = 12.sp, lineHeight = 17.sp)
-            } else {
-                Text("Connect your cloud provider to begin ↗",
-                    color = accent, fontSize = 12.sp, modifier = Modifier.clickable(onClick = onConnect))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            ProviderStatus(state)
+            Spacer(Modifier.weight(1f))
+            state.summary?.sample?.balanceObservedAt?.let {
+                Text(formatTime(it), color = muted, fontSize = 10.sp)
             }
-            TrendGraph(state.trends.runway, Modifier.fillMaxWidth().height(28.dp))
-            TrendCaption(state.trends.runway)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Metric("BALANCE", balanceText(state), "Provider reported", Modifier.weight(1f),
-                trend = state.trends.balance)
-            Metric("KNOWN BURN", burnText(state), "Per hour", Modifier.weight(1f),
-                trend = state.trends.burn)
+        QuickMetricCard("◧", "Balance", balanceText(state),
+            if (state.summary != null) "Burn ${burnText(state)}" else "Provider reported",
+            state.trends.balance, healthy)
+        QuickMetricCard("◷", "Safe runway",
+            state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
+            state.summary?.let { "Raw: ${formatRunway(it.rawRunway)}" } ?: runwayDetail(state),
+            state.trends.runway, if (state.activeRunwayThresholdHours != null || state.stale) amber else accent)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Instances", color = white, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.weight(1f))
+            Text(if (state.connected && state.instances.isNotEmpty()) "${running.size} running" else "—",
+                color = muted, fontSize = 11.sp)
         }
-        Text(statusLine(state), color = if (state.stale) amber else muted, fontSize = 12.sp,
-            maxLines = 2, lineHeight = 16.sp)
+        if (running.isEmpty()) {
+            Text(if (state.connected && state.summary != null && !state.stale) "No running instances"
+                else "Waiting for instance data",
+                color = muted, fontSize = 11.sp,
+                modifier = Modifier.fillMaxWidth().background(panel, RoundedCornerShape(12.dp)).padding(12.dp))
+        } else {
+            running.take(2).forEach { QuickInstanceRow(it) }
+            if (running.size > 2) {
+                Text("+ ${running.size - 2} more", color = accent, fontSize = 11.sp,
+                    modifier = Modifier.clickable(onClick = onDashboard))
+            }
+        }
+        if (!state.connected || state.status !in setOf(SyncStatus.HEALTHY, SyncStatus.SYNCING)) {
+            Text(state.message, color = if (state.stale) amber else muted, fontSize = 11.sp,
+                maxLines = 2, lineHeight = 15.sp)
+        }
         Spacer(Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = if (state.connected) onDashboard else onConnect) {
-                Text(if (state.connected) "Dashboard" else "Connect provider")
+                Text(if (state.connected) "Dashboard" else "Connect")
             }
-            OutlinedButton(onClick = onSearch) { Text("Search  $searchShortcut", color = white) }
+            TextButton(onClick = onSearch) { Text("Search", color = accent) }
+            TextButton(onClick = { onThemeChange(if (isDark) ThemeMode.LIGHT else ThemeMode.DARK) }) {
+                Text(if (isDark) "☀" else "☾", color = accent, fontSize = 18.sp)
+            }
             TextButton(onClick = onRefresh, enabled = state.connected && !state.busy) {
                 Text("↻", fontSize = 19.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickMetricCard(
+    icon: String, title: String, value: String, detail: String, trend: CardTrend, tone: Color,
+) {
+    Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(12.dp))
+        .border(1.dp, muted.copy(alpha = .16f), RoundedCornerShape(12.dp)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, color = tone, fontSize = 21.sp, modifier = Modifier.width(34.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = muted, fontSize = 11.sp)
+                Text(value, color = white, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+            Text(detail, color = muted, fontSize = 10.sp, maxLines = 2,
+                modifier = Modifier.widthIn(max = 110.dp))
+        }
+        TrendGraph(trend, Modifier.fillMaxWidth().height(16.dp), tone)
+    }
+}
+
+@Composable
+private fun QuickInstanceRow(instance: CloudInstance) {
+    Row(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(12.dp))
+        .border(1.dp, muted.copy(alpha = .16f), RoundedCornerShape(12.dp)).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).background(healthy, RoundedCornerShape(50)))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("#${instance.id.value}", color = white, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(instance.label?.takeIf { it.isNotBlank() } ?: "Running instance", color = muted,
+                fontSize = 10.sp, maxLines = 1)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(instance.computeRate?.let { "${formatMoney(it.amountPerHour, it.currency, 4)}/hr" }
+                ?: "Unknown", color = accent, fontSize = 10.sp, maxLines = 1)
+            Text("Compute", color = muted, fontSize = 9.sp)
         }
     }
 }
@@ -295,14 +388,14 @@ private fun Dashboard(
                 } else false
             }
             .verticalScroll(rememberScrollState()).padding(28.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             BrandMark()
             Spacer(Modifier.width(12.dp))
             Column {
                 Text("CreditWatch", color = white, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
-                Text("Cloud credit monitor", color = muted, fontSize = 12.sp)
+                Text("Your cloud credit, at a glance", color = muted, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
             ProviderSearchBar(entries, searchRequest, onSearchAction)
@@ -310,9 +403,8 @@ private fun Dashboard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             ProviderStatus(state)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = if (page == DashboardPage.PROVIDER) onOverview else onProvider) {
-                Text(if (page == DashboardPage.PROVIDER) "← Overview" else "Provider", color = accent)
-            }
+            TextButton(onClick = onOverview) { Text("Overview", color = if (page == DashboardPage.OVERVIEW) white else muted) }
+            TextButton(onClick = onProvider) { Text("Provider", color = if (page == DashboardPage.PROVIDER) white else muted) }
             Spacer(Modifier.width(8.dp))
             ThemeToggle(themeMode, onThemeChange)
             Spacer(Modifier.width(8.dp))
@@ -321,43 +413,131 @@ private fun Dashboard(
         if (page == DashboardPage.PROVIDER) {
             ConnectionView(state, controller, closing, onOverview)
         } else {
-            Label("YOUR CREDIT AT A GLANCE")
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Metric("BALANCE", balanceText(state), "Provider reported", Modifier.weight(1f),
-                    large = true, trend = state.trends.balance)
-                Metric("KNOWN BURN", burnText(state), burnDetail(state), Modifier.weight(1f),
-                    large = true, trend = state.trends.burn)
-                Metric("SAFE RUNWAY", state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
-                    runwayDetail(state), Modifier.weight(1f), large = true, trend = state.trends.runway)
+            OverviewContent(state, controller, closing, onProvider)
+        }
+    }
+}
+
+@Composable
+private fun OverviewContent(
+    state: MonitoringState, controller: MonitoringController, closing: Boolean, onProvider: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Label("OVERVIEW")
+                Spacer(Modifier.height(5.dp))
+                Text("Know how long your credit may last", color = white, fontSize = 21.sp,
+                    fontWeight = FontWeight.SemiBold)
             }
-            Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(22.dp)).padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Label("MONITORING")
-                Text(if (closing) "Closing…" else state.message, color = white, fontSize = 14.sp)
-                Text(statusLine(state), color = if (state.stale) amber else muted, fontSize = 12.sp)
-                state.summary?.let { summary ->
-                    Text("Raw runway: ${formatRunway(summary.rawRunway)}  •  Known costs only", color = muted, fontSize = 12.sp)
-                    Text(summary.average?.let {
-                        "Last-hour average: ${formatMoney(it.rate.amountPerHour, summary.sample.balance.currency, 4)}/hr, " +
-                            "${it.coverage.toMinutes()} minutes observed"
-                    } ?: "More history will improve the safe-runway estimate.", color = muted, fontSize = 12.sp)
-                }
-                Text("Safe runway uses the higher of current burn and the one-hour average, plus a 10% buffer.",
-                    color = muted, fontSize = 12.sp)
-            }
-            if (!state.connected) {
-                Text("Connect your cloud provider to begin ↗", color = accent, fontSize = 14.sp,
-                    textDecoration = TextDecoration.Underline, modifier = Modifier.clickable(onClick = onProvider))
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = controller::refreshNow, enabled = !state.busy && !closing &&
-                        state.status !in setOf(SyncStatus.AUTH_ERROR, SyncStatus.RATE_LIMITED)) {
-                        Text(if (state.busy) "Refreshing…" else "Refresh now")
-                    }
-                    TextButton(onClick = onProvider) { Text("Manage provider", color = muted) }
+            if (state.connected) {
+                Button(onClick = controller::refreshNow, enabled = !state.busy && !closing &&
+                    state.status !in setOf(SyncStatus.AUTH_ERROR, SyncStatus.RATE_LIMITED)) {
+                    Text(if (state.busy) "Refreshing…" else "↻  Refresh now")
                 }
             }
         }
+        RunwayHero(state, onProvider)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Metric("BALANCE", balanceText(state), "Provider reported", Modifier.weight(1f),
+                large = true, trend = state.trends.balance)
+            Metric("KNOWN BURN", burnText(state), burnDetail(state), Modifier.weight(1f),
+                large = true, trend = state.trends.burn)
+            Metric("RAW RUNWAY", state.summary?.let { formatRunway(it.rawRunway) } ?: "—",
+                "Known costs before the safety buffer", Modifier.weight(1f), large = true)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MonitoringPanel(state, closing, Modifier.weight(1f))
+            CostCoveragePanel(state, Modifier.weight(1f))
+        }
+        if (state.connected) InstancesPanel(state)
+    }
+}
+
+@Composable
+private fun InstancesPanel(state: MonitoringState) {
+    val running = state.instances.filter { it.state == InstanceState.RUNNING }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Label("ACTIVE INSTANCES")
+            Spacer(Modifier.weight(1f))
+            Text(if (state.instances.isEmpty() && state.stale) "Waiting for refresh"
+                else "${running.size} running", color = muted, fontSize = 12.sp)
+        }
+        if (running.isEmpty()) {
+            Text(if (state.instances.isEmpty() && state.stale) "Instance details are not in the saved snapshot."
+                else "No running instances reported.", color = muted, fontSize = 12.sp)
+        } else running.forEach { QuickInstanceRow(it) }
+    }
+}
+
+@Composable
+private fun RunwayHero(state: MonitoringState, onProvider: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(24.dp)).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Label("SAFE RUNWAY")
+            Spacer(Modifier.weight(1f))
+            state.activeRunwayThresholdHours?.let {
+                Text("⚠  Below ${it}h", color = amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
+                    color = if (state.stale && state.summary != null) amber else white,
+                    fontSize = 43.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Text(runwayDetail(state), color = muted, fontSize = 13.sp, lineHeight = 18.sp)
+                if (!state.connected) {
+                    Text("Connect Vast.ai to start monitoring →", color = accent, fontSize = 13.sp,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.clickable(onClick = onProvider))
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                TrendGraph(state.trends.runway, Modifier.fillMaxWidth().height(70.dp))
+                TrendCaption(state.trends.runway)
+            }
+        }
+        Text("Estimate uses known costs, the higher of current burn and the one-hour average, and a 10% buffer.",
+            color = muted, fontSize = 11.sp, lineHeight = 16.sp)
+    }
+}
+
+@Composable
+private fun MonitoringPanel(state: MonitoringState, closing: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier.background(panel, RoundedCornerShape(22.dp)).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Label("MONITORING")
+        Text(if (closing) "Closing…" else state.message, color = white, fontSize = 14.sp,
+            fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+        Text(statusLine(state), color = if (state.stale) amber else muted, fontSize = 12.sp,
+            lineHeight = 17.sp)
+        if (state.activeRunwayThresholdHours != null) {
+            Text("Low-runway alert is active. You will be notified at the next lower threshold.",
+                color = amber, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+    }
+}
+
+@Composable
+private fun CostCoveragePanel(state: MonitoringState, modifier: Modifier = Modifier) {
+    val summary = state.summary
+    Column(modifier.background(panel, RoundedCornerShape(22.dp)).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Label("COST COVERAGE")
+        Text(if (summary == null) "Waiting for provider data" else
+            if (summary.sample.unknownCosts.isEmpty()) "Known instance costs included" else "Some costs are unknown",
+            color = white, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(burnDetail(state), color = muted, fontSize = 12.sp, lineHeight = 17.sp)
+        Text(summary?.average?.let {
+            "One-hour average: ${formatMoney(it.rate.amountPerHour, summary.sample.balance.currency, 4)}/hr " +
+                "across ${it.coverage.toMinutes()} minutes"
+        } ?: "More readings will improve the one-hour average.",
+            color = muted, fontSize = 12.sp, lineHeight = 17.sp)
+        Text("Bandwidth and any missing prices are outside the runway estimate.",
+            color = muted, fontSize = 11.sp, lineHeight = 16.sp)
     }
 }
 
@@ -381,12 +561,16 @@ private fun ConnectionView(
     var linkFailed by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(22.dp)).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Connect your cloud provider", color = white, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
-        Text("Vast.ai is the first supported provider. CreditWatch reads your account balance and instances.",
+        Label("PROVIDER")
+        Text(if (state.connected) "Vast.ai connection" else "Connect Vast.ai",
+            color = white, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
+        Text("CreditWatch reads your account balance and instances. It cannot start, stop, or delete resources.",
             color = muted, fontSize = 13.sp)
         if (state.connected) {
             ProviderStatus(state)
-            Text("Your Vast.ai account is connected.", color = white, fontSize = 14.sp)
+            Text(state.message, color = if (state.stale) amber else white, fontSize = 14.sp)
+            Text("Your API key stays in your operating system's secure store. Removing the account also attempts to clear local monitoring history and alerts.",
+                color = muted, fontSize = 12.sp, lineHeight = 17.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = onOverview) { Text("View dashboard") }
                 TextButton(onClick = { controller.removeAccount() }, enabled = !state.busy && !closing) {
@@ -472,13 +656,24 @@ private fun ProviderSearchBar(entries: List<SearchEntry>, requestId: Int, onSele
 
 @Composable private fun ProviderStatus(state: MonitoringState) {
     val live = state.connected && !state.stale && state.status in setOf(SyncStatus.HEALTHY, SyncStatus.DEGRADED)
+    val label = when {
+        !state.connected && state.busy -> "Loading account"
+        !state.connected -> "Not connected"
+        state.status == SyncStatus.CONNECTING -> "Connecting"
+        state.status == SyncStatus.SYNCING -> "Syncing"
+        state.status == SyncStatus.AUTH_ERROR -> "Key rejected"
+        state.status == SyncStatus.RATE_LIMITED -> "Rate limited"
+        state.status == SyncStatus.OFFLINE -> "Offline"
+        state.status == SyncStatus.DEGRADED -> "Partial data"
+        state.stale -> "Saved data"
+        state.busy -> "Syncing"
+        else -> "Monitoring"
+    }
     Row(Modifier.background(panel, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).background(if (live) healthy else amber, RoundedCornerShape(50)))
         Spacer(Modifier.width(8.dp))
-        Text(if (!state.connected) "Vast.ai  •  Not connected"
-            else "Vast.ai  •  ${if (state.stale) "Stale" else if (state.busy) "Syncing" else "Monitoring"}",
-            color = white, fontSize = 12.sp)
+        Text("Vast.ai  •  $label", color = white, fontSize = 12.sp)
     }
 }
 
@@ -493,13 +688,17 @@ private fun ProviderSearchBar(entries: List<SearchEntry>, requestId: Int, onSele
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Label(label)
         Text(value, color = white, fontSize = if (large) 25.sp else 19.sp,
-            fontWeight = FontWeight.Medium, maxLines = 1)
+            fontWeight = FontWeight.Medium, maxLines = if (large) 2 else 1,
+            lineHeight = if (large) 28.sp else 22.sp)
         Text(detail, color = muted, fontSize = if (large) 12.sp else 11.sp,
             lineHeight = 16.sp, maxLines = if (large) 2 else 3)
         if (trend != null) {
             Spacer(Modifier.weight(1f))
             TrendGraph(trend, Modifier.fillMaxWidth().height(if (large) 36.dp else 22.dp))
             TrendCaption(trend)
+        } else if (large) {
+            Spacer(Modifier.weight(1f))
+            Text("Estimate from known costs", color = muted, fontSize = 10.sp)
         }
     }
 }
@@ -514,8 +713,8 @@ private fun TrendCaption(trend: CardTrend) {
 }
 
 @Composable
-private fun TrendGraph(trend: CardTrend, modifier: Modifier = Modifier) {
-    val lineColor = accent
+private fun TrendGraph(trend: CardTrend, modifier: Modifier = Modifier, color: Color? = null) {
+    val lineColor = color ?: accent
     val points = remember(trend) { trend.points.mapNotNull { point ->
         point.value.toFloat().takeIf(Float::isFinite)?.let { point.time to it }
     } }
