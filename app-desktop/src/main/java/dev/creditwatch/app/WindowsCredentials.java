@@ -78,7 +78,11 @@ final class WindowsCredentials {
             credential.userName = new WString("CreditWatch");
             if (!api.CredWrite(credential, 0)) throw failure("save");
         } finally {
-            blob.clear();
+            try {
+                blob.clear();
+            } finally {
+                blob.close();
+            }
         }
     }
 

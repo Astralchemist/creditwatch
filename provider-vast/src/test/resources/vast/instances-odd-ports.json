@@ -1,0 +1,9 @@
+{"success":true,"instances":[
+  {"id":18423,"actual_status":"running","label":"ports as a list",
+   "instance":{"gpuCostPerHour":0.5,"diskHour":0.02},
+   "public_ipaddr":"203.0.113.43","ssh_port":"not a port",
+   "ports":["8080/tcp"]},
+  {"id":18424,"actual_status":"running","label":"binding without a host port",
+   "instance":{"gpuCostPerHour":0.5,"diskHour":0.02},
+   "ports":{"8080/tcp":[{"HostIp":"0.0.0.0"}]}}
+]}

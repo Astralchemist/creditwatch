@@ -2,7 +2,6 @@ package dev.creditwatch.app
 
 import dev.creditwatch.domain.*
 import dev.creditwatch.provider.*
-import dev.creditwatch.vast.VastFailure
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
@@ -55,9 +54,11 @@ class MonitoringControllerTest {
         val f = fixture()
         f.controller.start(); runCurrent()
         val original = f.controller.state.value.summary
-        f.provider.failure = VastFailure.Unavailable
+        assertEquals(listOf("1"), f.controller.state.value.instances.map { it.id.value })
+        f.provider.failure = ProviderFailure.Unavailable
         advanceTimeBy(60_000); runCurrent()
         assertEquals(original, f.controller.state.value.summary)
+        assertEquals(listOf("1"), f.controller.state.value.instances.map { it.id.value })
         assertTrue(f.controller.state.value.stale)
         assertEquals(SyncStatus.OFFLINE, f.controller.state.value.status)
         advanceTimeBy(60_000); runCurrent()
@@ -73,7 +74,7 @@ class MonitoringControllerTest {
 
     @Test fun retryAfterCannotBeBypassedWithRefresh(): Unit = runTest {
         val f = fixture()
-        f.provider.failure = VastFailure.RateLimited(Duration.ofMinutes(20))
+        f.provider.failure = ProviderFailure.RateLimited(Duration.ofMinutes(20))
         f.controller.start(); runCurrent()
         repeat(10) { f.controller.refreshNow() }
         advanceTimeBy(19 * 60_000); runCurrent()
@@ -99,7 +100,7 @@ class MonitoringControllerTest {
         val f = fixture()
         val sample = sample(f.clock.instant().minusSeconds(3600))
         f.history.save(sample)
-        f.provider.failure = VastFailure.Unauthorized
+        f.provider.failure = ProviderFailure.Unauthorized
         f.controller.start(); runCurrent()
         assertEquals(sample, f.controller.state.value.summary?.sample)
         assertTrue(f.controller.state.value.stale)
@@ -116,7 +117,7 @@ class MonitoringControllerTest {
     @Test fun connectionPersistsKeyOnlyAfterValidationAndErasesInput(): Unit = runTest {
         val f = fixture(savedKey = false)
         f.controller.start(); runCurrent()
-        f.provider.failure = VastFailure.Unauthorized
+        f.provider.failure = ProviderFailure.Unauthorized
         val invalid = "invalid".toCharArray()
         f.controller.connect(invalid)?.join()
         assertNull(f.secrets.key)
@@ -128,6 +129,45 @@ class MonitoringControllerTest {
         assertTrue(valid.all { it == '\u0000' })
         assertNotNull(f.controller.state.value.summary)
         f.controller.stop()
+    }
+
+    @Test fun rejectedKeyAtConnectionTimeSurfacesAsAuthError(): Unit = runTest {
+        val f = fixture(savedKey = false)
+        f.stopping {
+            f.controller.start(); runCurrent()
+            f.provider.failure = ProviderFailure.Unauthorized
+            f.controller.connect("invalid".toCharArray())?.join(); runCurrent()
+            assertFalse(f.controller.state.value.connected)
+            assertEquals(SyncStatus.AUTH_ERROR, f.controller.state.value.status)
+        }
+    }
+
+    @Test fun offlineBackoffCannotBeBypassedWithRefresh(): Unit = runTest {
+        val f = fixture()
+        f.stopping {
+            f.controller.start(); runCurrent()
+            f.provider.failure = ProviderFailure.Unavailable
+            advanceTimeBy(60_000); runCurrent()   // first failure: 60s backoff
+            advanceTimeBy(60_000); runCurrent()   // second failure: 120s backoff
+            assertEquals(SyncStatus.OFFLINE, f.controller.state.value.status)
+            assertTrue(f.controller.state.value.backingOff)
+            val calls = f.provider.calls
+            repeat(10) { f.controller.refreshNow() }
+            advanceTimeBy(119_000); runCurrent()
+            assertEquals(calls, f.provider.calls)
+            advanceTimeBy(1_000); runCurrent()
+            assertEquals(calls + 1, f.provider.calls)
+        }
+    }
+
+    @Test fun removingTheAccountErasesTheProviderCredential(): Unit = runTest {
+        val f = fixture()
+        f.stopping {
+            f.controller.start(); runCurrent()
+            assertFalse(f.provider.erased)
+            f.controller.removeAccount()?.join()
+            assertTrue(f.provider.erased)
+        }
     }
 
     @Test fun exponentialDelayIsCapped() {
@@ -157,7 +197,47 @@ class MonitoringControllerTest {
         f.controller.stop()
     }
 
-    private fun TestScope.fixture(savedKey: Boolean = true): Fixture {
+    @Test fun onlyArmedThresholdsNotify(): Unit = runTest {
+        val f = fixture(thresholds = setOf(1))
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        // Roughly four hours of safe runway: past the 6h mark, which is not armed here.
+        f.provider.balanceAmount = "5"
+        f.controller.start(); runCurrent()
+        assertTrue(events.isEmpty())
+        assertNull(f.controller.state.value.activeRunwayThresholdHours)
+
+        f.provider.balanceAmount = "0.50"
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals(listOf(1), events.map { it.thresholdHours })
+        f.controller.stop()
+    }
+
+    @Test fun switchingEveryThresholdOffSilencesAlertsAndRearmingWarnsAfresh(): Unit = runTest {
+        val f = fixture()
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        f.provider.balanceAmount = "5"
+        f.controller.setAlertThresholds(emptySet())
+        f.controller.start(); runCurrent()
+        assertTrue(events.isEmpty())
+        assertNull(f.controller.state.value.activeRunwayThresholdHours)
+
+        f.controller.setAlertThresholds(setOf(6, 1))
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals(listOf(6), events.map { it.thresholdHours })
+        assertEquals(6, f.controller.state.value.activeRunwayThresholdHours)
+        f.controller.stop()
+    }
+
+    private fun TestScope.fixture(
+        savedKey: Boolean = true,
+        thresholds: Set<Int> = dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS.toSet(),
+    ): Fixture {
         val clock = object : Clock() {
             override fun getZone(): ZoneId = ZoneOffset.UTC
             override fun withZone(zone: ZoneId): Clock = this
@@ -166,7 +246,17 @@ class MonitoringControllerTest {
         val history = MemoryHistory()
         val secrets = MemorySecrets(if (savedKey) "test".toCharArray() else null)
         val provider = FakeProvider(clock)
-        return Fixture(MonitoringController(secrets, history, { provider }, clock, StandardTestDispatcher(testScheduler)), history, secrets, provider, clock)
+        return Fixture(MonitoringController(secrets, history, { provider }, clock,
+            StandardTestDispatcher(testScheduler), thresholds), history, secrets, provider, clock)
+    }
+
+    /**
+     * Stops the controller even when [body] throws. Its scope is not a child of the test scope,
+     * so a leaked poll loop keeps scheduling on the test scheduler and runTest hangs on a
+     * failed assertion instead of reporting it.
+     */
+    private suspend fun Fixture.stopping(body: suspend () -> Unit) {
+        try { body() } finally { controller.stop() }
     }
 
     private data class Fixture(val controller: MonitoringController, val history: MemoryHistory, val secrets: MemorySecrets, val provider: FakeProvider, val clock: Clock)
@@ -194,9 +284,10 @@ class MonitoringControllerTest {
         var instanceDelay = 0L
         var accountAgeSeconds = 0L
         var balanceAmount = "30"
+        var erased = false
+        override fun eraseCredential() { erased = true }
         override val id = ProviderId("vast")
         override val capabilities = ProviderCapabilities(true, true, true, false)
-        override suspend fun validateCredentials() = CredentialValidation.Valid
         override suspend fun getAccountSnapshot(): BalanceSnapshot {
             calls++
             failure?.let { throw it }

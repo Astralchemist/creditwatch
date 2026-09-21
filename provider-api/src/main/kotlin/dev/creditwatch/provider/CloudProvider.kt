@@ -9,25 +9,19 @@ data class ProviderCapabilities(
     val providesBandwidthPricing: Boolean,
 )
 
-sealed interface CredentialValidation {
-    data object Valid : CredentialValidation
-    data object Invalid : CredentialValidation
-}
-
-sealed interface ProviderError {
-    data object Unauthorized : ProviderError
-    data object RateLimited : ProviderError
-    data object NetworkUnavailable : ProviderError
-    data object Timeout : ProviderError
-    data class InvalidResponse(val reason: String) : ProviderError
-    data class ServerError(val statusCode: Int) : ProviderError
-}
-
+/** Read-only. Every method fails with [ProviderFailure]; a rejected key surfaces as
+ *  [ProviderFailure.Unauthorized] from the call that needed it. */
 interface CloudProvider {
     val id: ProviderId
     val capabilities: ProviderCapabilities
 
-    suspend fun validateCredentials(): CredentialValidation
     suspend fun getAccountSnapshot(): BalanceSnapshot
     suspend fun getInstances(): List<CloudInstance>
+
+    /**
+     * Wipes the adapter's own copy of the credential; the instance is unusable afterwards.
+     * It cannot reach copies the HTTP stack made while sending requests, so this shortens the
+     * key's lifetime in memory rather than removing every trace of it.
+     */
+    fun eraseCredential() {}
 }

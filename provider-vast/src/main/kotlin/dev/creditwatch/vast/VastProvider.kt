@@ -2,8 +2,8 @@ package dev.creditwatch.vast
 
 import dev.creditwatch.domain.*
 import dev.creditwatch.provider.CloudProvider
-import dev.creditwatch.provider.CredentialValidation
 import dev.creditwatch.provider.ProviderCapabilities
+import dev.creditwatch.provider.ProviderFailure
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -16,6 +16,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import io.ktor.utils.io.readAvailable
 import java.math.BigDecimal
@@ -27,24 +30,20 @@ import java.time.Duration
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-sealed class VastFailure(message: String) : RuntimeException(message) {
-    data object Unauthorized : VastFailure("Vast.ai rejected the API key")
-    data class RateLimited(val retryAfter: Duration? = null) : VastFailure("Vast.ai rate limit reached")
-    data object Unavailable : VastFailure("Vast.ai is unavailable")
-    data object InvalidResponse : VastFailure("Vast.ai returned an unexpected response")
-}
-
 class VastProvider(
     private val client: HttpClient,
-    private val apiKey: String,
+    apiKey: CharArray,
     private val clock: Clock = Clock.systemUTC(),
     private val baseUrl: String = "https://console.vast.ai",
 ) : CloudProvider {
+    /** Owned copy, so the caller can wipe its buffer as soon as the provider is built. */
+    private val apiKey = apiKey.copyOf()
+
     init {
         val uri = URI(baseUrl)
         require(uri.scheme == "https" || (uri.scheme == "http" && uri.host in setOf("localhost", "127.0.0.1")))
         require(uri.userInfo == null && uri.query == null && uri.fragment == null)
-        require(apiKey.isNotBlank())
+        require(this.apiKey.any { !it.isWhitespace() && it != '\u0000' })
     }
 
     override val id = ProviderId("vast")
@@ -52,17 +51,14 @@ class VastProvider(
     private val json = Json { ignoreUnknownKeys = true }
     private val usd = CurrencyCode("USD")
 
-    override suspend fun validateCredentials(): CredentialValidation = try {
-        getAccountSnapshot()
-        CredentialValidation.Valid
-    } catch (_: VastFailure.Unauthorized) {
-        CredentialValidation.Invalid
-    }
-
     override suspend fun getAccountSnapshot(): BalanceSnapshot {
-        val body = request("/api/v0/users/current")
+        val body = request("/api/v0/users/current/")
         val user = decode<UserDto>(body)
-        val balance = user.balance?.decimal() ?: throw VastFailure.InvalidResponse
+        // Vast returns both fields. On a live credit-only account "balance" was 0.00 while
+        // "credit" held the 4.51 actually available, so "credit" is the spendable figure and
+        // the one this product is about; "balance" is only a fallback for a shape that omits it.
+        // Preferring "balance" here reads as a zero balance and fires an immediate runway alert.
+        val balance = (user.credit ?: user.balance)?.decimal() ?: throw ProviderFailure.InvalidResponse
         return BalanceSnapshot(AccountId("vast:${user.id}"), Money(balance, usd), clock.instant())
     }
 
@@ -71,16 +67,16 @@ class VastProvider(
         val seenTokens = mutableSetOf<String>()
         var nextToken: String? = null
         repeat(100) {
-            val path = if (nextToken == null) "/api/v1/instances?limit=25"
-                else "/api/v1/instances?limit=25&after_token=${java.net.URLEncoder.encode(nextToken, Charsets.UTF_8)}"
+            val path = if (nextToken == null) "/api/v1/instances/?limit=25"
+                else "/api/v1/instances/?limit=25&after_token=${java.net.URLEncoder.encode(nextToken, Charsets.UTF_8)}"
             val page = decode<InstancesPageDto>(request(path))
-            if (page.success != true) throw VastFailure.InvalidResponse
+            if (page.success != true) throw ProviderFailure.InvalidResponse
             instances += page.instances.map(::mapInstance)
             val token = page.nextToken?.takeIf(String::isNotBlank) ?: return instances
-            if (!seenTokens.add(token)) throw VastFailure.InvalidResponse
+            if (!seenTokens.add(token)) throw ProviderFailure.InvalidResponse
             nextToken = token
         }
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     private fun mapInstance(dto: InstanceDto): CloudInstance {
@@ -96,19 +92,61 @@ class VastProvider(
             computeRate = dto.pricing?.gpuCostPerHour?.decimal()?.let { MoneyRate(it, usd) },
             storageRate = dto.pricing?.diskHour?.decimal()?.let { MoneyRate(it, usd) },
             label = dto.label,
+            endpoint = endpointOf(dto),
         )
     }
 
+    /**
+     * The address fields, which are not part of what this adapter is verified against.
+     *
+     * UNVERIFIED: the shapes below follow Vast's documented instance schema, but no live
+     * instance has confirmed them — the account had none running when this was written. They
+     * are therefore parsed defensively rather than declared: a field that arrives in an
+     * unexpected shape yields no endpoint instead of failing the whole instance list, because
+     * a wrong guess here must not be able to stop balance and burn from being read.
+     */
+    private fun endpointOf(dto: InstanceDto): InstanceEndpoint? {
+        val ports = publishedPorts(dto.ports)
+        val ip = dto.publicIpAddr?.takeIf(String::isNotBlank)
+        val sshHost = dto.sshHost?.takeIf(String::isNotBlank)
+        val sshPort = dto.sshPort?.content?.toIntOrNull()?.takeIf { it in 1..65535 }
+        if (ip == null && sshHost == null && ports.isEmpty()) return null
+        return InstanceEndpoint(ip, sshHost, sshPort, ports)
+    }
+
+    /** Docker's binding map: `{"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "41234"}]}`. */
+    private fun publishedPorts(element: JsonElement?): Map<Int, Int> {
+        val bindings = element as? JsonObject ?: return emptyMap()
+        return bindings.entries.mapNotNull { (key, value) ->
+            val container = key.substringBefore('/').toIntOrNull()?.takeIf { it in 1..65535 }
+                ?: return@mapNotNull null
+            val host = (value as? JsonArray)?.firstNotNullOfOrNull { binding ->
+                ((binding as? JsonObject)?.get("HostPort") as? JsonPrimitive)
+                    ?.content?.toIntOrNull()?.takeIf { it in 1..65535 }
+            } ?: return@mapNotNull null
+            container to host
+        }.toMap()
+    }
+
+    override fun eraseCredential() = apiKey.fill('\u0000')
+
+    /** Built per request so no long-lived [String] copy of the key is retained by this adapter. */
+    private fun authorization(): String {
+        check(apiKey.any { it != '\u0000' }) { "The Vast.ai credential has been erased" }
+        return "Bearer " + String(apiKey)
+    }
+
     private suspend fun request(path: String): String {
+        val credential = authorization()
         try {
             return client.prepareGet(baseUrl + path) {
-                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                header(HttpHeaders.Authorization, credential)
             }.execute { response ->
             when (response.status) {
                 HttpStatusCode.OK -> Unit
-                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw VastFailure.Unauthorized
-                HttpStatusCode.TooManyRequests -> throw VastFailure.RateLimited(retryAfter(response.headers[HttpHeaders.RetryAfter]))
-                else -> throw VastFailure.Unavailable
+                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw ProviderFailure.Unauthorized
+                HttpStatusCode.TooManyRequests -> throw ProviderFailure.RateLimited(retryAfter(response.headers[HttpHeaders.RetryAfter]))
+                else -> throw ProviderFailure.Unavailable
             }
             val channel = response.bodyAsChannel()
             val bytes = ByteArrayOutputStream()
@@ -116,17 +154,17 @@ class VastProvider(
             while (true) {
                 val count = channel.readAvailable(chunk, 0, chunk.size)
                 if (count < 0) break
-                if (bytes.size() + count > 1_000_000) throw VastFailure.InvalidResponse
+                if (bytes.size() + count > 1_000_000) throw ProviderFailure.InvalidResponse
                 bytes.write(chunk, 0, count)
             }
             bytes.toString(StandardCharsets.UTF_8)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: VastFailure) {
+        } catch (failure: ProviderFailure) {
             throw failure
         } catch (_: Exception) {
-            throw VastFailure.Unavailable
+            throw ProviderFailure.Unavailable
         }
     }
 
@@ -142,16 +180,22 @@ class VastProvider(
     private inline fun <reified T> decode(body: String): T = try {
         json.decodeFromString<T>(body)
     } catch (_: Exception) {
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     private fun JsonPrimitive.decimal(): BigDecimal = try {
         BigDecimal(content)
     } catch (_: NumberFormatException) {
-        throw VastFailure.InvalidResponse
+        throw ProviderFailure.InvalidResponse
     }
 
     companion object {
+        /**
+         * Redirects are not followed, so the Authorization header can never be replayed to
+         * another host. Every request path must therefore be the one Vast serves directly:
+         * the slashless forms answer 301 to the trailing-slash form, which would surface as
+         * [ProviderFailure.Unavailable] and leave the app permanently offline.
+         */
         fun newHttpClient(): HttpClient = HttpClient(CIO) {
             followRedirects = false
             install(HttpTimeout) {
@@ -164,7 +208,11 @@ class VastProvider(
 }
 
 @Serializable
-private data class UserDto(val id: Long, val balance: JsonPrimitive? = null)
+private data class UserDto(
+    val id: Long,
+    val balance: JsonPrimitive? = null,
+    val credit: JsonPrimitive? = null,
+)
 
 @Serializable
 private data class InstancesPageDto(
@@ -179,6 +227,12 @@ private data class InstanceDto(
     @SerialName("actual_status") val actualStatus: String? = null,
     val label: String? = null,
     @SerialName("instance") val pricing: InstancePricingDto? = null,
+    // Address fields: see endpointOf. Held as raw JSON so an unexpected shape cannot throw
+    // during decoding and take the whole page with it.
+    @SerialName("public_ipaddr") val publicIpAddr: String? = null,
+    @SerialName("ssh_host") val sshHost: String? = null,
+    @SerialName("ssh_port") val sshPort: JsonPrimitive? = null,
+    val ports: JsonElement? = null,
 )
 
 @Serializable

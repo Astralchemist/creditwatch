@@ -4,11 +4,13 @@ import dev.creditwatch.domain.*
 import dev.creditwatch.engine.BurnCalculator
 import dev.creditwatch.engine.MonitoringCalculator
 import dev.creditwatch.engine.MonitoringSummary
+import dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS
+import dev.creditwatch.engine.RunwayAlertEvaluation
 import dev.creditwatch.engine.RunwayAlertEvent
 import dev.creditwatch.engine.RunwayAlertRule
 import dev.creditwatch.provider.CloudProvider
+import dev.creditwatch.provider.ProviderFailure
 import dev.creditwatch.provider.SecretStore
-import dev.creditwatch.vast.VastFailure
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -26,10 +28,13 @@ data class MonitoringState(
     val connected: Boolean = false,
     val busy: Boolean = true,
     val summary: MonitoringSummary? = null,
+    val instances: List<CloudInstance> = emptyList(),
     val stale: Boolean = true,
     val status: SyncStatus = SyncStatus.DISCONNECTED,
     val message: String = "Loading saved account…",
     val nextSyncAt: Instant? = null,
+    /** True while [nextSyncAt] is a failure backoff that a manual refresh must not shorten. */
+    val backingOff: Boolean = false,
     val activeRunwayThresholdHours: Int? = null,
     val trends: CardTrends = CardTrends(),
 )
@@ -38,9 +43,10 @@ data class MonitoringState(
 class MonitoringController(
     private val secrets: SecretStore?,
     private val history: MonitoringHistory,
-    private val providerFactory: (String) -> CloudProvider,
+    private val providerFactory: (CharArray) -> CloudProvider,
     private val clock: Clock = Clock.systemUTC(),
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    alertThresholdHours: Set<Int> = RUNWAY_ALERT_THRESHOLDS_HOURS.toSet(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val mutableState = MutableStateFlow(MonitoringState())
@@ -52,7 +58,8 @@ class MonitoringController(
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val alertChannel = Channel<RunwayAlertEvent>(Channel.UNLIMITED)
     val alertEvents = alertChannel.receiveAsFlow()
-    private val alertRule = RunwayAlertRule()
+    /** Null once every threshold is switched off. Read by the poll loop, written from the UI. */
+    @Volatile private var alertRule: RunwayAlertRule? = ruleFor(alertThresholdHours)
     private val alertStates = mutableMapOf<AccountId, RunwayAlertState>()
     private var pollJob: Job? = null
     private var provider: CloudProvider? = null
@@ -68,18 +75,19 @@ class MonitoringController(
                         "Secure key storage is not available on this system yet." else "Connect Vast.ai to begin.")
                     return@launch
                 }
-                try { provider = providerFactory(String(key)) } finally { key.fill('\u0000') }
+                try { provider = providerFactory(key) } finally { key.fill('\u0000') }
                 val restored = try {
                     val last = history.latest()
                     history.prune(clock.instant().minus(Duration.ofHours(72)))
                     last?.let {
-                        val samples = history.since(it.accountId, it.observedAt.minusSeconds(3720))
+                        val samples = history.since(it.accountId, it.observedAt.minus(HISTORY_WINDOW))
                         calculator.calculate(it, samples) to buildCardTrends(samples + it)
                     }
                 } catch (_: Exception) { null }
                 mutableState.value = MonitoringState(connected = true, busy = false,
                     summary = restored?.first, trends = restored?.second ?: CardTrends(),
-                    stale = true, message = "Showing saved data. Refreshing…")
+                    stale = true, status = SyncStatus.SYNCING,
+                    message = "Showing saved data. Refreshing…")
                 beginPolling()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
@@ -98,28 +106,48 @@ class MonitoringController(
         }
         return scope.launch {
             mutableState.update { it.copy(busy = true, status = SyncStatus.CONNECTING, message = "Connecting to Vast.ai…") }
+            var candidate: CloudProvider? = null
             try {
-                val candidate = providerFactory(String(key))
+                candidate = providerFactory(key)
                 val account = candidate.getAccountSnapshot()
                 requireNotNull(secrets).put(SECRET_ID, key)
+                provider?.eraseCredential()
                 provider = candidate
-                mutableState.value = MonitoringState(connected = true, busy = false, message = "Connected. Loading instances…")
+                candidate = null // adopted; the finally below must not wipe it
+                mutableState.value = MonitoringState(connected = true, busy = false,
+                    status = SyncStatus.SYNCING, message = "Connected. Loading instances…")
                 beginPolling(account)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 if (failure is SecureStorageUnavailableException) storageReady.set(false)
-                mutableState.value = MonitoringState(busy = false, message = failureMessage(failure))
+                mutableState.value = MonitoringState(busy = false,
+                    status = statusFor(failure, SyncStatus.DISCONNECTED), message = failureMessage(failure))
             } finally {
+                candidate?.eraseCredential()
                 key.fill('\u0000')
                 actionPending.set(false)
             }
         }
     }
 
+    /**
+     * Replaces the armed thresholds. Switching one off clears the state behind it, so arming
+     * it again later warns afresh rather than staying silent on a threshold already marked
+     * as notified.
+     */
+    fun setAlertThresholds(hours: Set<Int>) {
+        alertRule = ruleFor(hours)
+        alertStates.clear()
+        if (hours.isEmpty()) {
+            mutableState.update { it.copy(activeRunwayThresholdHours = null) }
+        }
+    }
+
     fun refreshNow() {
         val current = state.value
         if (!current.connected || current.busy || current.status == SyncStatus.AUTH_ERROR) return
-        if (current.status == SyncStatus.RATE_LIMITED && current.nextSyncAt?.isAfter(clock.instant()) == true) return
+        // Every failure backs off, not just rate limiting, so gate on the flag rather than the status.
+        if (current.backingOff && current.nextSyncAt?.isAfter(clock.instant()) == true) return
         refreshRequests.trySend(Unit)
     }
 
@@ -130,6 +158,7 @@ class MonitoringController(
             pollJob?.cancelAndJoin()
             try {
                 requireNotNull(secrets).delete(SECRET_ID)
+                provider?.eraseCredential() // after the delete: the catch below resumes polling
                 provider = null
                 val cleared = runCatching { history.clear() }.isSuccess
                 alertStates.clear()
@@ -146,6 +175,7 @@ class MonitoringController(
 
     suspend fun stop() {
         scope.coroutineContext.job.cancelAndJoin()
+        provider?.eraseCredential()
         withContext(Dispatchers.IO) { history.close() }
     }
 
@@ -156,8 +186,11 @@ class MonitoringController(
             var prefetched = initialAccount
             while (isActive) {
                 while (refreshRequests.tryReceive().isSuccess) { /* coalesce requests already waiting */ }
-                mutableState.update { it.copy(busy = true, status = SyncStatus.SYNCING, message = "Refreshing Vast.ai…", nextSyncAt = null) }
-                var retryAfter: Duration? = null
+                mutableState.update { it.copy(busy = true, status = SyncStatus.SYNCING,
+                    message = "Refreshing Vast.ai…", nextSyncAt = null, backingOff = false) }
+                // status, nextSyncAt and backingOff are published together: a gap between them
+                // lets refreshNow() see a failure with no deadline yet and skip the backoff.
+                var next = clock.instant()
                 try {
                     val source = requireNotNull(provider)
                     val account = prefetched ?: source.getAccountSnapshot()
@@ -167,7 +200,7 @@ class MonitoringController(
                     val burn = BurnCalculator().calculate(account.accountId, account.balance.currency, instances, now)
                     val sample = MonitoringSample(account.accountId, now, account.observedAt, account.balance, burn.knownRate, burn.unknownCosts)
                     var storageFailed = false
-                    val prior = try { history.since(sample.accountId, now.minusSeconds(3720)) }
+                    val prior = try { history.since(sample.accountId, now.minus(HISTORY_WINDOW)) }
                         catch (_: Exception) { storageFailed = true; emptyList() }
                     val summary = calculator.calculate(sample, prior)
                     try {
@@ -183,15 +216,19 @@ class MonitoringController(
                         storageFailed = true
                         null
                     } ?: RunwayAlertState()
-                    val alert = alertRule.evaluate(previousAlert, summary.safeRunway, now,
+                    val alert = alertRule?.evaluate(previousAlert, summary.safeRunway, now,
                         fresh = !oldBalance && !incomplete)
+                        ?: RunwayAlertEvaluation(RunwayAlertState(), null)
                     alertStates[sample.accountId] = alert.state
                     try { history.saveRunwayAlert(sample.accountId, alert.state) }
                     catch (_: Exception) { storageFailed = true }
+                    next = clock.instant().plus(backoff(failures))
                     mutableState.value = MonitoringState(
                         connected = true, busy = false, summary = summary, stale = oldBalance,
+                        instances = instances,
                         trends = buildCardTrends(prior + sample),
                         status = if (storageFailed || incomplete) SyncStatus.DEGRADED else SyncStatus.HEALTHY,
+                        nextSyncAt = next,
                         activeRunwayThresholdHours = alert.state.activeThresholdHours,
                         message = when {
                             storageFailed -> "Live data loaded. Local history is unavailable."
@@ -204,22 +241,16 @@ class MonitoringController(
                 catch (failure: Exception) {
                     prefetched = null
                     failures = (failures + 1).coerceAtMost(6)
-                    retryAfter = (failure as? VastFailure.RateLimited)?.retryAfter
+                    val retryAfter = (failure as? ProviderFailure.RateLimited)?.retryAfter
+                    next = clock.instant().plus(maxOf(backoff(failures), retryAfter ?: Duration.ZERO))
                     mutableState.update { it.copy(
                         busy = false, stale = true,
-                        status = when (failure) {
-                            VastFailure.Unauthorized -> SyncStatus.AUTH_ERROR
-                            is VastFailure.RateLimited -> SyncStatus.RATE_LIMITED
-                            VastFailure.Unavailable -> SyncStatus.OFFLINE
-                            else -> SyncStatus.DEGRADED
-                        },
+                        status = statusFor(failure, SyncStatus.DEGRADED),
                         message = failureMessage(failure),
+                        nextSyncAt = next, backingOff = true,
                     ) }
-                    if (failure is VastFailure.Unauthorized) return@launch
+                    if (failure is ProviderFailure.Unauthorized) return@launch
                 }
-                val wait = maxOf(backoff(failures), retryAfter ?: Duration.ZERO)
-                val next = clock.instant().plus(wait)
-                mutableState.update { it.copy(nextSyncAt = next) }
                 // Wake periodically only to mark aging data. Never decrement a saved runway.
                 while (isActive && clock.instant() < next) {
                     val remaining = Duration.between(clock.instant(), next).toMillis().coerceAtLeast(1)
@@ -233,17 +264,32 @@ class MonitoringController(
         }
     }
 
+    /** [fallback] covers non-provider failures: secure storage and anything unexpected. */
+    private fun statusFor(failure: Exception, fallback: SyncStatus): SyncStatus = when (failure) {
+        ProviderFailure.Unauthorized -> SyncStatus.AUTH_ERROR
+        is ProviderFailure.RateLimited -> SyncStatus.RATE_LIMITED
+        ProviderFailure.Unavailable -> SyncStatus.OFFLINE
+        is ProviderFailure -> SyncStatus.DEGRADED
+        else -> fallback
+    }
+
     private fun failureMessage(failure: Exception): String = when (failure) {
-        VastFailure.Unauthorized -> "Vast.ai rejected the key. Remove the account and connect with a valid key."
-        is VastFailure.RateLimited -> "Vast.ai rate limit reached. Waiting before retrying."
-        VastFailure.InvalidResponse -> "Vast.ai returned incomplete or unreadable data. Retrying automatically."
-        VastFailure.Unavailable -> "Vast.ai is unavailable. Retrying automatically."
+        ProviderFailure.Unauthorized -> "Vast.ai rejected the key. Remove the account and connect with a valid key."
+        is ProviderFailure.RateLimited -> "Vast.ai rate limit reached. Waiting before retrying."
+        ProviderFailure.InvalidResponse -> "Vast.ai returned incomplete or unreadable data. Retrying automatically."
+        ProviderFailure.Unavailable -> "Vast.ai is unavailable. Retrying automatically."
         is SecureStorageUnavailableException -> failure.message!!
         else -> "Could not complete the operation. Check secure storage and connectivity."
     }
 
     companion object {
         private const val SECRET_ID = "vast-default"
+
+        private fun ruleFor(hours: Set<Int>): RunwayAlertRule? =
+            hours.takeIf { it.isNotEmpty() }?.let { RunwayAlertRule(it.sorted()) }
+
+        /** Covers the chart window plus the slack the one-hour burn average needs at its edge. */
+        private val HISTORY_WINDOW: Duration = TREND_WINDOW.plusMinutes(2)
         internal fun backoff(failures: Int): Duration =
             Duration.ofSeconds(if (failures <= 1) 60 else minOf(900L, 60L * (1L shl (failures - 1).coerceAtMost(4))))
     }
