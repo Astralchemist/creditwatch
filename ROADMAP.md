@@ -2,10 +2,13 @@
 
 Track individual features and bugs as GitHub Issues. Assign each issue to the next release milestone, and link it from the pull request that closes it. Keep this file to release goals and acceptance checks.
 
-## 0.1.0 — dependable Vast monitoring
+## 0.1.0 — dependable Vast monitoring on macOS
 
-Scope: one Vast.ai account, monitored from one desktop. Several providers at once is 0.2.0;
-the settings pane already says so on screen.
+Scope: one Vast.ai account, on macOS. Several providers at once is 0.2.0, and the settings pane
+already says so on screen. Windows and Linux are 0.2.0 too — their credential stores are written
+and unit tested, and the Linux Secret Service round trip passes in a container, but no release
+should claim a platform nobody has run it on. The code stays cross-platform; only the promise is
+narrowed.
 
 - [x] JDK 21 multi-module desktop project
 - [x] Vast account and instance reads through a provider adapter
@@ -23,20 +26,17 @@ the settings pane already says so on screen.
     figure is `credit`, not the `balance` the account schema documents
   - [ ] Stopped-instance behavior still unverified
 - [x] Implement Windows Credential Manager and Linux Secret Service stores ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
-- [ ] Verify Windows ARM64 and x64 runtime compatibility before claiming Windows support ([#9](https://github.com/Astralchemist/creditwatch/issues/9))
-- [ ] Verify notifications and tray behavior on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
-  - [x] macOS: tray icon, popover anchoring and a real low-runway notification all fired against a
-    live account that reached zero
-  - [ ] Windows and Linux unverified
-- [ ] CI passes on macOS, Windows, and Linux ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
-- [ ] Test native installers and application restart on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
-  - [x] macOS bundle builds with its own bundle id and icon, which notifications depend on
-  - [x] macOS `.dmg` builds, installs, and records a live reading from the installed copy —
+- [x] Verify notifications and tray behavior on macOS ([#3](https://github.com/Astralchemist/creditwatch/issues/3)):
+  tray icon, popover anchoring and a real low-runway notification all fired against a live
+  account that reached zero
+- [ ] CI passes on macOS ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
+- [x] macOS installer and application restart ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
+  - [x] The bundle carries its own id and icon, which notifications depend on
+  - [x] The `.dmg` builds, installs, and records a live reading from the installed copy —
     verified with `scripts/packaged-app-smoke.sh`, not by watching it launch. Packaging needs a
     non-Homebrew JDK 21; Compose refuses Homebrew's, which is why this gate read as untested
   - [x] The bundled runtime keeps the modules jlink cannot infer. `java.sql` was pruned and the
     installed app could not open its database; `java.prefs` would have lost every saved setting
-  - [ ] Windows `.msi` and Linux `.deb` untested
 - [ ] Complete the manual acceptance cases in the build specification
   - [x] Installed-app smoke test scripted (`scripts/packaged-app-smoke.sh`): package, install,
     and confirm the installed binary records a reading. A unit suite cannot see this class of
@@ -53,6 +53,12 @@ the settings pane already says so on screen.
   account, the controller holds one provider and one `vast-default` secret, and the headline
   shows one runway — a second account needs all four
 - [ ] A second provider adapter, RunPod first
+- [ ] Windows and Linux as supported platforms, deferred out of 0.1.0 rather than dropped
+  - [ ] Windows ARM64 and x64 runtime compatibility ([#9](https://github.com/Astralchemist/creditwatch/issues/9))
+  - [ ] Notifications and tray behaviour on Windows and Linux ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
+  - [ ] `.msi` and `.deb` packaging, each checked the way macOS was: install it, then watch the
+    installed binary record a reading
+  - [ ] CI across the full macOS, Windows and Linux matrix ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
 - [ ] Telemetry agent paired to the desktop ([#7](https://github.com/Astralchemist/creditwatch/issues/7)).
   The agent is polled by the desktop rather than calling home, since a laptop behind NAT is not
   reachable from a rented instance

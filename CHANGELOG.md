@@ -3,7 +3,8 @@
 ## 0.1.0 — unreleased
 
 The first release: one Vast.ai account, watched from the macOS menu bar, answering one
-question — how long does the credit last at the current burn.
+question — how long does the credit last at the current burn. macOS only; Windows and Linux
+are implemented but unverified, and wait for 0.2.0.
 
 ### Monitoring
 
@@ -51,9 +52,10 @@ question — how long does the credit last at the current burn.
   keyed by account; the session and the popover are not
 - **Phone alerts need the app running.** A sleeping computer measures nothing and so sends
   nothing
-- **macOS is the verified platform.** Windows and Linux credential stores are implemented and
-  unit tested, and the Linux Secret Service round trip passes in a container, but neither
-  desktop has been verified at runtime, and `.msi` and `.deb` packaging is untested
+- **macOS only.** Windows and Linux credential stores are implemented and unit tested, and the
+  Linux Secret Service round trip passes headless in a container, but neither desktop has been
+  run, and `.msi` and `.deb` packaging is untested. They are deferred to 0.2.0 rather than
+  dropped: the code stays cross-platform, only the claim is narrowed
 - Bandwidth is reported as an unknown cost and excluded from burn
 - Instance address and published ports are read where Vast reports them, for a telemetry agent
   that does not exist yet. The field shapes are unverified against a live instance
