@@ -6,34 +6,60 @@ CreditWatch is a local-first desktop utility for monitoring prepaid cloud credit
 
 ## What it looks like
 
-![The CreditWatch popover on macOS, anchored under its menu bar icon, showing an account whose credit has run out](docs/popover-depleted.png)
+![The CreditWatch popover in light appearance, anchored under its menu bar icon, showing an account whose credit has run out](docs/popover-depleted.webp)
 
 The popover is the whole application — there is no main window. It opens under the menu bar
-icon and closes when it loses focus. The screenshot above is a real account that has reached
-zero, which is the state most worth showing, and every part of it is readable:
+icon and closes when it loses focus. The account above is a real one that has reached zero,
+which is the state most worth showing, and every part of it is readable:
 
 - **Header.** A status dot, the provider name, and the sync state in one line. Green means a
   fresh reading; amber covers saved data, rate limiting, partial data, and being offline. The
   gear opens settings in place, the cross closes the popover.
 - **Headline.** The safe runway, which includes a 10% buffer over the higher of the current
-  burn and the one-hour average. It is coloured by health rather than being decorative: green
-  while there is room, amber once a threshold trips, red in the last hour, and red reading
-  "Out of credit" when the balance is gone. `0m` is not used for a depleted account, because a
+  burn and the one-hour average. It is coloured by health rather than decoratively: green while
+  there is room, amber once a threshold trips, red in the last hour, and red reading "Out of
+  credit" when the balance is gone. `0m` is not used for a depleted account, because a
   countdown at zero still looks like a countdown.
-- **Depleted marker.** The triangle and the word to the right of `SAFE RUNWAY` repeat the state
-  in a second channel for anyone who cannot rely on the colour.
+- **Depleted marker.** The triangle and the word beside `SAFE RUNWAY` repeat the state in a
+  second channel for anyone who cannot rely on the colour.
 - **Subline.** Why the safe figure differs from the raw one — the buffer, a missing price, a
   stale reading, or, here, that the credit is exhausted at this burn rate.
 - **Balance and known burn.** Two tiles with area-filled sparklines over a six-hour window.
   The balance tile turns red with the headline. The fill covers measured readings only: a
   projection to zero is drawn as an unfilled dashed line, and a gap in the readings breaks the
   fill rather than inventing a shape across it. A series that never moves is held at mid-height
-  so it reads as steady instead of as absent.
+  so it reads as steady rather than as absent.
 - **Instances.** Running instances only, each with the chip icon, its id, its label, and its
   known hourly compute rate. "0 running" here is consistent with the burn having collapsed to
   storage and bandwidth once the credit ran out.
 - **Footer.** The time of the next automatic sync, and a manual refresh that is disabled during
   a failure backoff so it cannot be used to hammer a rate-limited provider.
+
+### Settings
+
+![The settings pane listing Vast.ai as connected, with RunPod, Lambda and Paperspace marked as not yet supported](docs/settings-providers.webp)
+
+Settings slides in over the popover rather than opening a window. Providers are rows, so a
+second account is an obvious next step rather than a redesign. Only Vast.ai has an adapter
+today and only it can be connected; the rest are listed and visibly unavailable, because a user
+who came for RunPod should learn that here rather than by hunting for it. Each unavailable row
+carries a hover hint explaining what is missing. Monitoring still runs a single account — the
+roadmap names the four things a second one needs.
+
+![The settings pane showing three runway alert thresholds side by side as switches, a phone alert toggle, and appearance as a single icon](docs/settings-alerts.webp)
+
+- **Safe runway alerts.** The three thresholds sit side by side as switches. The heading carries
+  the words "safe runway" once, so each cell is a duration and a hover hint rather than the same
+  phrase three times. A cell marks itself `alerted` when that threshold is the one currently
+  tripped, and `held` when it cannot be armed — a threshold the runway has already fallen under
+  is refused, because switching it on would fire at once instead of warning early. A threshold
+  armed *before* the fall still fires; the reading governs arming only.
+- **Phone.** Publishes the same alerts to an ntfy topic that a phone subscribes to by scanning a
+  QR code. Switching it on generates a private topic and shows the code. The section says
+  plainly that this works only while CreditWatch is running: a sleeping computer measures
+  nothing and therefore sends nothing.
+- **Appearance.** One icon, not three labelled buttons — a sun, a moon, or a half dial for
+  System. It shows the current mode and cycles on click, with the names in the hover hint.
 
 ## Principles
 
