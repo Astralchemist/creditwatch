@@ -26,6 +26,13 @@ compose.desktop {
     application {
         mainClass = "dev.creditwatch.app.MainKt"
         nativeDistributions {
+            // jpackage trims the bundled runtime with jlink, and module detection cannot see a
+            // dependency reached by reflection. The SQLite driver is loaded with Class.forName,
+            // so java.sql was pruned and the installed app could not open its own database —
+            // it launched, drew its window and silently monitored nothing. java.prefs is the
+            // same story for the saved appearance and alert settings. This list comes from
+            // `./gradlew :app-desktop:suggestRuntimeModules`; re-run it when dependencies change.
+            modules("java.instrument", "java.management", "java.prefs", "java.sql", "jdk.unsupported")
             packageName = "CreditWatch"
             packageVersion = project.version.toString()
             description = "Know how long your cloud credit will last."
