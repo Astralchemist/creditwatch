@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 1.0.0 — 2026-09-21
 
 The first release: one Vast.ai account, watched from the macOS menu bar, answering one
 question — how long does the credit last at the current burn. macOS only; Windows and Linux
-are implemented but unverified, and wait for 0.2.0.
+are implemented but unverified, and wait for 1.1.0.
 
 ### Monitoring
 
@@ -54,7 +54,7 @@ are implemented but unverified, and wait for 0.2.0.
   nothing
 - **macOS only.** Windows and Linux credential stores are implemented and unit tested, and the
   Linux Secret Service round trip passes headless in a container, but neither desktop has been
-  run, and `.msi` and `.deb` packaging is untested. They are deferred to 0.2.0 rather than
+  run, and `.msi` and `.deb` packaging is untested. They are deferred to 1.1.0 rather than
   dropped: the code stays cross-platform, only the claim is narrowed
 - Bandwidth is reported as an unknown cost and excluded from burn
 - Instance address and published ports are read where Vast reports them, for a telemetry agent
@@ -70,6 +70,7 @@ are implemented but unverified, and wait for 0.2.0.
   nothing, while every test passed
 - `scripts/packaged-app-smoke.sh` packages, installs, and checks that the installed binary
   records a real reading
-- The macOS bundle version is pinned to 1.0.0 because jpackage rejects a zero major version
+- The release is 1.0.0 rather than 0.1.0 because jpackage refuses an app-version with a zero
+  major component: a 0.x repository would have had to ship a bundle claiming a version it did
+  not have, and every download would have needed that explained
 
-No version has been released yet.
