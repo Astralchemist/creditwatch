@@ -18,6 +18,8 @@ data class CreditWatchPalette(
     val accent: Color,
     val healthy: Color,
     val warning: Color,
+    /** Reserved for a reading that is already bad, not one that is heading that way. */
+    val critical: Color,
 )
 
 val darkPalette = CreditWatchPalette(
@@ -29,6 +31,7 @@ val darkPalette = CreditWatchPalette(
     accent = Color(0xFF6BBEFF),
     healthy = Color(0xFF4ED898),
     warning = Color(0xFFFFC35B),
+    critical = Color(0xFFFF7A6B),
 )
 
 val lightPalette = CreditWatchPalette(
@@ -40,6 +43,7 @@ val lightPalette = CreditWatchPalette(
     accent = Color(0xFF087F70),
     healthy = Color(0xFF207245),
     warning = Color(0xFF925408),
+    critical = Color(0xFFB3261E),
 )
 
 val LocalCreditWatchPalette = compositionLocalOf { darkPalette }

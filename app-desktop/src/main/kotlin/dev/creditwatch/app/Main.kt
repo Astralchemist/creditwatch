@@ -56,6 +56,7 @@ private val muted @Composable get() = palette.muted
 private val accent @Composable get() = palette.accent
 private val healthy @Composable get() = palette.healthy
 private val amber @Composable get() = palette.warning
+private val critical @Composable get() = palette.critical
 private val white @Composable get() = palette.text
 
 /** The popover is the whole product; settings slides in over it rather than opening a window. */
@@ -263,25 +264,40 @@ private fun ColumnScope.RunwayPane(
 
         Spacer(Modifier.height(0.dp))
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            val depleted = state.summary?.safeRunway == RunwayResult.BalanceDepleted
+            val tone = runwayTone(state)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Caption("SAFE RUNWAY")
                 Spacer(Modifier.weight(1f))
-                state.activeRunwayThresholdHours?.let {
-                    Icon(CwIcons.Alert, contentDescription = null, tint = amber,
-                        modifier = Modifier.size(11.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("below ${it}h", color = amber, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                when {
+                    depleted -> {
+                        Icon(CwIcons.Alert, contentDescription = null, tint = critical,
+                            modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("depleted", color = critical, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    }
+                    state.activeRunwayThresholdHours != null -> {
+                        Icon(CwIcons.Alert, contentDescription = null, tint = tone,
+                            modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("below ${state.activeRunwayThresholdHours}h", color = tone,
+                            fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
             }
-            Text(state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
-                color = if (state.stale && state.summary != null) amber else white,
-                fontSize = 50.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            Text(runwaySubline(state), color = muted, fontSize = 11.sp, lineHeight = 15.sp)
+            // "0m" reads as a countdown that is still running. Being out of credit is a different
+            // state from having very little left, and the headline is the only place that lands.
+            Text(if (depleted) "Out of credit" else state.summary?.let { formatRunway(it.safeRunway) } ?: "—",
+                color = tone,
+                fontSize = if (depleted) 32.sp else 50.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(runwaySubline(state), color = if (depleted) critical else muted,
+                fontSize = 11.sp, lineHeight = 15.sp)
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCell("BALANCE", balanceText(state), state.trends.balance, healthy, Modifier.weight(1f),
-                projection = balanceProjection(state))
+            MetricCell("BALANCE", balanceText(state), state.trends.balance,
+                if (state.summary?.safeRunway == RunwayResult.BalanceDepleted) critical else healthy,
+                Modifier.weight(1f), projection = balanceProjection(state))
             MetricCell("KNOWN BURN", burnCompact(state), state.trends.burn, accent, Modifier.weight(1f))
         }
 
@@ -464,7 +480,8 @@ private fun InstanceRow(instance: CloudInstance) {
     Row(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(10.dp))
         .padding(horizontal = 11.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).background(healthy, CircleShape))
+        // The row is about a piece of rented compute; a status dot said only that it existed.
+        Icon(CwIcons.Chip, contentDescription = null, tint = healthy, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(9.dp))
         Text(instance.id.value, color = white, fontSize = 12.sp, maxLines = 1)
         instance.label?.takeIf { it.isNotBlank() }?.let {
@@ -516,6 +533,24 @@ private fun statusTone(state: MonitoringState): Color = when {
     state.connected && (state.stale || state.status == SyncStatus.DEGRADED) -> amber
     state.connected && state.status in setOf(SyncStatus.HEALTHY, SyncStatus.SYNCING) -> healthy
     else -> muted
+}
+
+/**
+ * The headline colour carries the verdict: green when the runway is comfortable, amber once a
+ * threshold has tripped, red when the last hour is gone or the credit already is. Stale data
+ * stays amber, because an old healthy reading is not a healthy account.
+ */
+@Composable
+private fun runwayTone(state: MonitoringState): Color {
+    val summary = state.summary ?: return white
+    return when {
+        summary.safeRunway == RunwayResult.BalanceDepleted -> critical
+        state.stale -> amber
+        state.activeRunwayThresholdHours?.let { it <= 1 } == true -> critical
+        state.activeRunwayThresholdHours != null -> amber
+        summary.safeRunway is RunwayResult.Available -> healthy
+        else -> white
+    }
 }
 
 /** Where the balance line is headed: zero, at the moment the raw runway runs out. */
