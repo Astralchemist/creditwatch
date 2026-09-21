@@ -11,6 +11,10 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 - [x] Polling, stale state, backoff, and bounded SQLite history
 - [x] Menu bar quick view as the only window; search removed with the dashboard it navigated
 - [x] Low-runway rule with persisted deduplication and tray notifications
+- [x] Each runway threshold switched individually, with one the runway already sits under
+  refused rather than fired immediately
+- [x] Alerts published to a phone over an ntfy topic paired by QR code, while the app is running
+- [x] Settings lists providers as rows and names the ones with no adapter yet
 - [ ] Verify account, billing, and stopped-instance behavior against a real Vast account ([#1](https://github.com/Astralchemist/creditwatch/issues/1))
   - [x] Account and billing reads verified live: paths need trailing slashes, and the spendable
     figure is `credit`, not the `balance` the account schema documents
@@ -30,12 +34,14 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
   configurable 3 × 4 dashboard: the dashboard window it extended has been removed in favour of
   the popover, so the issue as written no longer has a surface to live on
 - [ ] Burn-spike alerts ([#6](https://github.com/Astralchemist/creditwatch/issues/6))
-- [ ] Monitor more than one provider account at once. The settings pane already lists providers
-  as rows, but `MonitoringHistory.latest()` takes no account, the controller holds one provider,
-  and the headline shows one runway — a second account needs all three
-- [ ] Reach a phone while the computer sleeps. Publishing from the desktop (shipped) covers only
-  a running app; anything further needs an always-on monitor, which is a decision against the
-  "no central backend" principle rather than a feature
+- [ ] Monitor more than one provider account at once. The settings pane lists providers as rows
+  already, and a second adapter is the smaller half: `MonitoringHistory.latest()` takes no
+  account, the controller holds one provider and one `vast-default` secret, and the headline
+  shows one runway — a second account needs all four
+- [ ] A second provider adapter, RunPod first
+- [ ] Reach a phone while the computer sleeps. Publishing from the desktop shipped in 0.1.0 and
+  covers only a running app; anything further needs an always-on monitor, which is a decision
+  against the "no central backend" principle rather than a feature
 - [ ] Optional Linux telemetry prototype ([#7](https://github.com/Astralchemist/creditwatch/issues/7))
 - [ ] Transparent idle and low-GPU recommendations ([#8](https://github.com/Astralchemist/creditwatch/issues/8))
 
