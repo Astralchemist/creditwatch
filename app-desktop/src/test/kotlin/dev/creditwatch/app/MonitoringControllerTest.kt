@@ -234,6 +234,47 @@ class MonitoringControllerTest {
         f.controller.stop()
     }
 
+    @Test fun aThresholdSwitchedOffStopsWarningEvenAfterItHasTripped(): Unit = runTest {
+        val f = fixture()
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        f.stopping {
+            // Roughly nine hours of safe runway: under the 12h mark, well clear of the 6h one.
+            f.provider.balanceAmount = "10"
+            f.controller.start(); runCurrent()
+            assertEquals(listOf(12), events.map { it.thresholdHours })
+
+            f.controller.setAlertThresholds(setOf(6, 1))
+            events.clear()
+            // Past the repeat cooldown, at a runway that has not moved.
+            advanceTimeBy(Duration.ofHours(7).toMillis()); runCurrent()
+            assertEquals(emptyList<Int>(), events.map { it.thresholdHours })
+            assertNull(f.controller.state.value.activeRunwayThresholdHours)
+        }
+    }
+
+    @Test fun rearmingOneThresholdWarnsAfreshRatherThanStayingSilent(): Unit = runTest {
+        val f = fixture()
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        f.stopping {
+            f.provider.balanceAmount = "10"
+            f.controller.start(); runCurrent()
+            assertEquals(listOf(12), events.map { it.thresholdHours })
+
+            f.controller.setAlertThresholds(setOf(6, 1))
+            events.clear()
+            f.controller.setAlertThresholds(dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS.toSet())
+            advanceTimeBy(60_000); runCurrent()
+            assertEquals(listOf(12), events.map { it.thresholdHours })
+            assertEquals(12, f.controller.state.value.activeRunwayThresholdHours)
+        }
+    }
+
     private fun TestScope.fixture(
         savedKey: Boolean = true,
         thresholds: Set<Int> = dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS.toSet(),

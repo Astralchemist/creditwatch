@@ -42,7 +42,10 @@ class RunwayAlertRule(
         val crossed = remaining?.let { value ->
             thresholdsHours.sorted().firstOrNull { value < Duration.ofHours(it.toLong()) }
         }
-        val previousThreshold = previous.activeThresholdHours
+        // The carried state may name a threshold this rule does not have: the user switched it
+        // off, or the app restarted before the change reached the stored row. Honouring it would
+        // warn about a mark that is no longer armed, so it counts as no previous threshold.
+        val previousThreshold = previous.activeThresholdHours?.takeIf { it in thresholdsHours }
         val lastNotified = previous.lastNotifiedAt
         val active = when {
             remaining == null -> null

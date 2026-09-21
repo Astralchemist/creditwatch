@@ -61,6 +61,8 @@ class MonitoringController(
     /** Null once every threshold is switched off. Read by the poll loop, written from the UI. */
     @Volatile private var alertRule: RunwayAlertRule? = ruleFor(alertThresholdHours)
     private val alertStates = mutableMapOf<AccountId, RunwayAlertState>()
+    /** Set when the armed set changes, so the next cycle ignores the state the old set left. */
+    private val alertStateReset = AtomicBoolean(false)
     private var pollJob: Job? = null
     private var provider: CloudProvider? = null
     private val calculator = MonitoringCalculator()
@@ -134,10 +136,15 @@ class MonitoringController(
      * Replaces the armed thresholds. Switching one off clears the state behind it, so arming
      * it again later warns afresh rather than staying silent on a threshold already marked
      * as notified.
+     *
+     * The stored row outlives this call, so clearing the cache alone is not enough: the next
+     * cycle would read the old threshold straight back out of it and warn about a mark that is
+     * no longer armed. The flag makes that cycle start from nothing and overwrite the row.
      */
     fun setAlertThresholds(hours: Set<Int>) {
         alertRule = ruleFor(hours)
         alertStates.clear()
+        alertStateReset.set(true)
         if (hours.isEmpty()) {
             mutableState.update { it.copy(activeRunwayThresholdHours = null) }
         }
@@ -210,12 +217,13 @@ class MonitoringController(
                     failures = 0
                     val incomplete = !sample.hasRequiredRates
                     val oldBalance = account.observedAt.isBefore(now.minusSeconds(120)) || account.observedAt.isAfter(now)
-                    val previousAlert = alertStates[sample.accountId] ?: try {
-                        history.runwayAlert(sample.accountId)
-                    } catch (_: Exception) {
-                        storageFailed = true
-                        null
-                    } ?: RunwayAlertState()
+                    val previousAlert = if (alertStateReset.getAndSet(false)) RunwayAlertState()
+                        else alertStates[sample.accountId] ?: try {
+                            history.runwayAlert(sample.accountId)
+                        } catch (_: Exception) {
+                            storageFailed = true
+                            null
+                        } ?: RunwayAlertState()
                     val alert = alertRule?.evaluate(previousAlert, summary.safeRunway, now,
                         fresh = !oldBalance && !incomplete)
                         ?: RunwayAlertEvaluation(RunwayAlertState(), null)
