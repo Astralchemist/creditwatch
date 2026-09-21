@@ -6,7 +6,7 @@ CreditWatch is a local-first desktop utility for monitoring prepaid cloud credit
 
 ## What it looks like
 
-![The CreditWatch popover on macOS, anchored under its menu bar icon, showing an account whose credit has run out](docs/popover-depleted.png)
+![The CreditWatch popover on macOS, anchored under its menu bar icon, showing an account whose credit has run out](docs/popover-depleted.webp)
 
 The popover is the whole application — there is no main window. It opens under the menu bar
 icon and closes when it loses focus. The screenshot above is a real account that has reached
