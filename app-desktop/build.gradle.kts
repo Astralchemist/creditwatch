@@ -17,6 +17,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("io.ktor:ktor-client-core:3.6.0")
     implementation("net.java.dev.jna:jna:5.19.1")
+    // Pairing shows a QR code the phone scans; drawn from the matrix, no image files.
+    implementation("com.google.zxing:core:3.5.3")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 

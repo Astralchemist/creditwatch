@@ -1,5 +1,8 @@
 package dev.creditwatch.app
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.TooltipPlacement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,13 +29,21 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.*
 import dev.creditwatch.domain.CurrencyCode
 import dev.creditwatch.domain.CloudInstance
 import dev.creditwatch.domain.InstanceState
+import dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS
 import dev.creditwatch.engine.RunwayResult
+import dev.creditwatch.engine.ThresholdArming
+import dev.creditwatch.engine.isArmable
+import dev.creditwatch.engine.thresholdArming
+import dev.creditwatch.notifications.PhoneAlertPublisher
+import dev.creditwatch.notifications.PhoneAlertResult
+import dev.creditwatch.notifications.PhoneAlertTarget
 import dev.creditwatch.persistence.SqliteMonitoringHistory
 import dev.creditwatch.vast.VastProvider
 import kotlinx.coroutines.launch
@@ -67,6 +78,8 @@ private val MonitoringState.canRefresh: Boolean get() = connected && !busy && !b
 
 fun main() = application {
     val http = remember { VastProvider.newHttpClient() }
+    val initialAlerts = remember { AlertSettings.load() }
+    val phone = remember { PhoneAlertPublisher(http) }
     val controller = remember {
         MonitoringController(
             when {
@@ -77,6 +90,7 @@ fun main() = application {
             },
             SqliteMonitoringHistory(historyPath()),
             { key -> VastProvider(http, key) },
+            alertThresholdHours = initialAlerts.enabledThresholdHours,
         )
     }
     val state by controller.state.collectAsState()
@@ -88,6 +102,24 @@ fun main() = application {
     var pane by remember { mutableStateOf(Pane.RUNWAY) }
     var trayAnchor by remember { mutableStateOf<Point?>(null) }
     var themeMode by remember { mutableStateOf(AppearanceSettings.load()) }
+    var alerts by remember { mutableStateOf(initialAlerts) }
+    var phoneStatus by remember { mutableStateOf<String?>(null) }
+    val setAlerts: (AlertPreferences) -> Unit = { updated ->
+        val thresholdsChanged = updated.enabledThresholdHours != alerts.enabledThresholdHours
+        alerts = updated
+        AlertSettings.save(updated)
+        if (thresholdsChanged) controller.setAlertThresholds(updated.enabledThresholdHours)
+    }
+    val testPhone = {
+        phoneStatus = "Sending…"
+        alerts.pairingTarget?.let { target ->
+            scope.launch {
+                phoneStatus = phone.publish(target, "CreditWatch",
+                    "Test alert. Pairing works.").describe()
+            }
+        } ?: run { phoneStatus = "Pair a phone first." }
+        Unit
+    }
     val setTheme: (ThemeMode) -> Unit = { mode ->
         themeMode = mode
         AppearanceSettings.save(mode)
@@ -106,13 +138,18 @@ fun main() = application {
     LaunchedEffect(controller) { controller.start() }
     LaunchedEffect(controller, trayState) {
         controller.alertEvents.collect { event ->
+            val depleted = event.runway == RunwayResult.BalanceDepleted
+            val body = if (depleted) "Balance depleted."
+                else "Safe runway is below ${event.thresholdHours}h (${formatRunway(event.runway)}). Based on known costs."
             if (isTraySupported) {
-                trayState.sendNotification(Notification(
-                    "CreditWatch — low runway",
-                    if (event.runway == RunwayResult.BalanceDepleted) "Balance depleted."
-                    else "Safe runway is below ${event.thresholdHours}h (${formatRunway(event.runway)}). Based on known costs.",
-                    if (event.thresholdHours <= 1) Notification.Type.Error else Notification.Type.Warning,
-                ))
+                trayState.sendNotification(Notification("CreditWatch — low runway", body,
+                    if (event.thresholdHours <= 1) Notification.Type.Error else Notification.Type.Warning))
+            }
+            // The phone push is best effort and never blocks or breaks the desktop notification.
+            alerts.phoneTarget?.let { target ->
+                val result = phone.publish(target, "CreditWatch — low runway", body,
+                    urgent = depleted || event.thresholdHours <= 1)
+                if (result != PhoneAlertResult.Delivered) phoneStatus = result.describe()
             }
         }
     }
@@ -154,7 +191,7 @@ fun main() = application {
         }
         CreditWatchTheme(themeMode) {
             Popover(state, controller, closing, pane, { pane = it }, { open = false },
-                themeMode, setTheme, quit)
+                themeMode, setTheme, quit, alerts, setAlerts, testPhone, phoneStatus)
         }
     }
 }
@@ -219,6 +256,8 @@ private fun Popover(
     state: MonitoringState, controller: MonitoringController, closing: Boolean,
     pane: Pane, onPane: (Pane) -> Unit, onClose: () -> Unit,
     themeMode: ThemeMode, onThemeChange: (ThemeMode) -> Unit, onQuit: () -> Unit,
+    alerts: AlertPreferences, onAlerts: (AlertPreferences) -> Unit,
+    onTestPhone: () -> Unit, phoneStatus: String?,
 ) {
     // Floating over the menu bar it needs its own rounded edge; as a plain window it must not.
     val shape: Shape = if (isTraySupported) RoundedCornerShape(16.dp) else RectangleShape
@@ -227,7 +266,8 @@ private fun Popover(
         .padding(horizontal = 16.dp, vertical = 14.dp)) {
         when {
             pane == Pane.SETTINGS ->
-                SettingsPane(state, controller, closing, { onPane(Pane.RUNWAY) }, themeMode, onThemeChange, onQuit)
+                SettingsPane(state, controller, closing, { onPane(Pane.RUNWAY) }, themeMode, onThemeChange,
+                    onQuit, alerts, onAlerts, onTestPhone, phoneStatus)
             !state.connected && !state.busy ->
                 ConnectPane(state, controller, closing, { onPane(Pane.SETTINGS) }, onClose)
             else ->
@@ -381,6 +421,8 @@ private fun ColumnScope.ConnectPane(
 private fun ColumnScope.SettingsPane(
     state: MonitoringState, controller: MonitoringController, closing: Boolean,
     onBack: () -> Unit, themeMode: ThemeMode, onThemeChange: (ThemeMode) -> Unit, onQuit: () -> Unit,
+    alerts: AlertPreferences, onAlerts: (AlertPreferences) -> Unit,
+    onTestPhone: () -> Unit, phoneStatus: String?,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconAction(CwIcons.ChevronLeft, "Back to runway", onBack)
@@ -392,41 +434,9 @@ private fun ColumnScope.SettingsPane(
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Spacer(Modifier.height(2.dp))
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Caption("ACCOUNT")
-            Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(12.dp)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).background(statusTone(state), CircleShape))
-                    Spacer(Modifier.width(9.dp))
-                    Text(if (state.connected) "Vast.ai connected" else "Not connected",
-                        color = white, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
-                Text("Your key is held in the operating system's secure store. Removing the account also " +
-                    "attempts to clear local monitoring history and alerts.",
-                    color = muted, fontSize = 11.sp, lineHeight = 16.sp)
-                if (state.connected) {
-                    TextButton(onClick = { controller.removeAccount() },
-                        enabled = !state.busy && !closing,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
-                        Text("Remove account", color = amber, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Caption("ALERTS")
-            ALERT_THRESHOLD_HOURS.forEach { hours ->
-                val tripped = state.activeRunwayThresholdHours == hours
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Safe runway below ${hours}h", color = if (tripped) amber else white, fontSize = 12.sp)
-                    Spacer(Modifier.weight(1f))
-                    if (tripped) Text("alerted", color = amber, fontSize = 11.sp)
-                }
-            }
-            Text("Thresholds are fixed in this release.", color = muted, fontSize = 10.sp)
-        }
+        ProvidersSection(state, controller, closing, onBack)
+        AlertsSection(state, alerts, onAlerts, closing)
+        PhoneSection(alerts, onAlerts, onTestPhone, phoneStatus, closing)
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Caption("APPEARANCE")
@@ -458,6 +468,258 @@ private fun ColumnScope.SettingsPane(
             Text("Quit", color = muted, fontSize = 12.sp)
         }
     }
+}
+
+/**
+ * One row per provider, so a second account is an obvious next step rather than a rewrite of
+ * the pane. Providers without an adapter are listed and visibly unavailable: hiding them would
+ * be tidier, but a user who came for RunPod deserves to learn that here rather than by hunting.
+ */
+@Composable
+private fun ProvidersSection(
+    state: MonitoringState, controller: MonitoringController, closing: Boolean, onBack: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Caption("PROVIDERS")
+            Spacer(Modifier.weight(1f))
+            Hint("Each provider holds its own credit, so each one has its own runway. " +
+                "CreditWatch monitors one connected account today.")
+        }
+        PROVIDER_CATALOGUE.forEach { entry ->
+            val connected = entry.adapter && entry.id == "vast" && state.connected
+            Row(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(10.dp))
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).background(
+                    if (connected) healthy else muted.copy(alpha = if (entry.adapter) .6f else .3f),
+                    CircleShape))
+                Spacer(Modifier.width(9.dp))
+                Text(entry.name, color = if (entry.adapter) white else muted,
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.weight(1f))
+                when {
+                    connected -> TextButton(onClick = { controller.removeAccount() },
+                        enabled = !state.busy && !closing,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp)) {
+                        Text("Remove", color = amber, fontSize = 11.sp)
+                    }
+                    entry.adapter -> TextButton(onClick = onBack, enabled = !closing,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp)) {
+                        Text("Connect", color = accent, fontSize = 11.sp)
+                    }
+                    else -> {
+                        Text("Not yet", color = muted, fontSize = 11.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Hint(buildString {
+                            append(entry.note ?: "Not supported yet")
+                            append(". CreditWatch needs a read-only adapter for ")
+                            append(entry.name)
+                            append(" before it can report its credit.")
+                        })
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().clickable(enabled = !closing) {
+            runCatching { uriHandler.openUri("https://github.com/Astralchemist/creditwatch/issues") }
+        }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(CwIcons.Plus, contentDescription = null, tint = accent, modifier = Modifier.size(12.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("Request another provider", color = accent, fontSize = 11.sp)
+        }
+        Text("Your key is held in the operating system's secure store. Removing an account also " +
+            "attempts to clear its local monitoring history and alerts.",
+            color = muted, fontSize = 10.sp, lineHeight = 14.sp)
+    }
+}
+
+/**
+ * The thresholds, as switches. The section heading carries "safe runway" once; each row is
+ * then just a duration with a hover hint, rather than the same five words three times over.
+ */
+@Composable
+private fun AlertsSection(
+    state: MonitoringState, alerts: AlertPreferences,
+    onAlerts: (AlertPreferences) -> Unit, closing: Boolean,
+) {
+    val runway = state.summary?.safeRunway ?: RunwayResult.Unavailable
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Caption("SAFE RUNWAY ALERTS")
+            Spacer(Modifier.weight(1f))
+            Hint("Notifies once when safe runway first falls past a mark, then at most every " +
+                "six hours while it stays there.")
+        }
+        RUNWAY_ALERT_THRESHOLDS_HOURS.forEach { hours ->
+            val armed = hours in alerts.enabledThresholdHours
+            val arming = thresholdArming(hours, runway)
+            // An armed threshold is never taken away by the reading; only arming a new one is.
+            val blocked = !armed && !arming.isArmable()
+            val tripped = state.activeRunwayThresholdHours == hours
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("${hours}h",
+                    color = when {
+                        blocked -> muted.copy(alpha = .5f)
+                        tripped -> amber
+                        armed -> white
+                        else -> muted
+                    },
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(7.dp))
+                Hint(thresholdHint(hours, arming, armed, blocked))
+                if (tripped) {
+                    Spacer(Modifier.width(7.dp))
+                    Text("alerted", color = amber, fontSize = 10.sp)
+                }
+                Spacer(Modifier.weight(1f))
+                Switch(
+                    checked = armed,
+                    onCheckedChange = { on ->
+                        onAlerts(alerts.copy(enabledThresholdHours =
+                            if (on) alerts.enabledThresholdHours + hours
+                            else alerts.enabledThresholdHours - hours))
+                    },
+                    enabled = !blocked && !closing,
+                    colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                    modifier = Modifier.size(width = 34.dp, height = 20.dp),
+                )
+            }
+        }
+        if (alerts.enabledThresholdHours.isEmpty()) {
+            Text("Every runway alert is off. Nothing will warn you before the credit runs out.",
+                color = amber, fontSize = 10.sp, lineHeight = 14.sp)
+        }
+    }
+}
+
+private fun thresholdHint(hours: Int, arming: ThresholdArming, armed: Boolean, blocked: Boolean): String = when {
+    blocked && arming is ThresholdArming.AlreadyBelow ->
+        "Safe runway is already under ${hours}h. Switching this on now would fire at once " +
+            "instead of warning you early, so it is held until the runway recovers."
+    blocked && arming == ThresholdArming.Depleted ->
+        "The credit is already gone, so there is nothing left for a ${hours}h warning to catch."
+    armed -> "On. Notifies when safe runway falls below ${hours}h."
+    else -> "Off. Nothing will fire at the ${hours}h mark."
+}
+
+/**
+ * Pairing a phone. The QR code carries the subscribe URL only — the provider key never leaves
+ * the Keychain, and nothing in a published alert names the account.
+ */
+@Composable
+private fun PhoneSection(
+    alerts: AlertPreferences, onAlerts: (AlertPreferences) -> Unit,
+    onTestPhone: () -> Unit, phoneStatus: String?, closing: Boolean,
+) {
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Caption("PHONE")
+            Spacer(Modifier.weight(1f))
+            Hint("Alerts are published from this computer to a private ntfy topic. They arrive " +
+                "only while CreditWatch is running: a sleeping laptop measures nothing and so " +
+                "sends nothing.")
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(CwIcons.Phone, contentDescription = null, tint = muted, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(9.dp))
+            Text("Send alerts to a phone", color = white, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = alerts.phoneEnabled,
+                onCheckedChange = { on ->
+                    onAlerts(alerts.copy(
+                        phoneEnabled = on,
+                        // Pairing needs an address; make one the first time it is switched on.
+                        phoneTopic = alerts.phoneTopic.ifBlank {
+                            if (on) PhoneAlertTarget.randomTopic() else ""
+                        },
+                    ))
+                },
+                enabled = !closing,
+                colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                modifier = Modifier.size(width = 34.dp, height = 20.dp),
+            )
+        }
+
+        if (alerts.phoneEnabled) {
+            val target = alerts.pairingTarget
+            Column(Modifier.fillMaxWidth().background(panel, RoundedCornerShape(12.dp)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                if (target == null) {
+                    Text("This server address is not usable. It must start with http:// or https://.",
+                        color = amber, fontSize = 11.sp, lineHeight = 15.sp)
+                } else {
+                    // White behind the code whatever the theme: scanners want the contrast.
+                    Box(Modifier.background(Color.White, RoundedCornerShape(8.dp)).padding(6.dp)) {
+                        QrCode(target.subscribeUrl, Modifier.size(116.dp))
+                    }
+                    Text("Install ntfy, then scan to subscribe", color = muted, fontSize = 10.sp)
+                    Text(target.subscribeUrl, color = accent, fontSize = 10.sp, maxLines = 2,
+                        modifier = Modifier.clickable {
+                            runCatching { uriHandler.openUri("https://ntfy.sh/docs/subscribe/phone/") }
+                        })
+                }
+                OutlinedTextField(
+                    value = alerts.phoneServer,
+                    onValueChange = { onAlerts(alerts.copy(phoneServer = it.trim())) },
+                    label = { Text("ntfy server", fontSize = 11.sp) },
+                    singleLine = true, enabled = !closing,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onTestPhone, enabled = !closing && target != null,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)) {
+                        Text("Send test", color = accent, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = { onAlerts(alerts.copy(phoneTopic = PhoneAlertTarget.randomTopic())) },
+                        enabled = !closing,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)) {
+                        Text("New topic", color = muted, fontSize = 11.sp)
+                    }
+                }
+                phoneStatus?.let {
+                    Text(it, color = if (it.startsWith("Sent")) healthy else amber,
+                        fontSize = 10.sp, lineHeight = 14.sp)
+                }
+                Text("Anyone who knows this address can read the alerts. They carry hours of " +
+                    "runway only — never your key, balance or instances.",
+                    color = muted, fontSize = 10.sp, lineHeight = 14.sp)
+            }
+        }
+    }
+}
+
+/** A hover explanation, so a control can be one word wide and still be understood. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Hint(text: String) {
+    TooltipArea(
+        tooltip = {
+            Box(Modifier.widthIn(max = 230.dp)
+                .background(raised, RoundedCornerShape(8.dp))
+                .border(1.dp, muted.copy(alpha = .25f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Text(text, color = white, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+        },
+        delayMillis = 250,
+        tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 14.dp)),
+    ) {
+        Icon(CwIcons.Info, contentDescription = text, tint = muted.copy(alpha = .75f),
+            modifier = Modifier.size(12.dp))
+    }
+}
+
+private fun PhoneAlertResult.describe(): String = when (this) {
+    PhoneAlertResult.Delivered -> "Sent. Check the phone."
+    is PhoneAlertResult.Rejected -> "The server refused the alert (HTTP $status)."
+    is PhoneAlertResult.Unreachable -> "Could not reach the server: $reason"
 }
 
 @Composable
@@ -510,9 +772,6 @@ private fun IconAction(icon: ImageVector, description: String, onClick: () -> Un
             tint = muted.copy(alpha = if (enabled) 1f else .35f))
     }
 }
-
-/** The thresholds [dev.creditwatch.engine.RunwayAlertRule] fires on, longest first for display. */
-private val ALERT_THRESHOLD_HOURS = listOf(12, 6, 1)
 
 private fun statusLabel(state: MonitoringState): String = when {
     state.status == SyncStatus.CONNECTING -> "Connecting"

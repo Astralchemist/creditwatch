@@ -30,6 +30,12 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
   configurable 3 × 4 dashboard: the dashboard window it extended has been removed in favour of
   the popover, so the issue as written no longer has a surface to live on
 - [ ] Burn-spike alerts ([#6](https://github.com/Astralchemist/creditwatch/issues/6))
+- [ ] Monitor more than one provider account at once. The settings pane already lists providers
+  as rows, but `MonitoringHistory.latest()` takes no account, the controller holds one provider,
+  and the headline shows one runway — a second account needs all three
+- [ ] Reach a phone while the computer sleeps. Publishing from the desktop (shipped) covers only
+  a running app; anything further needs an always-on monitor, which is a decision against the
+  "no central backend" principle rather than a feature
 - [ ] Optional Linux telemetry prototype ([#7](https://github.com/Astralchemist/creditwatch/issues/7))
 - [ ] Transparent idle and low-GPU recommendations ([#8](https://github.com/Astralchemist/creditwatch/issues/8))
 

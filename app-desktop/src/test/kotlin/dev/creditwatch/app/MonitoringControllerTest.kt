@@ -197,7 +197,47 @@ class MonitoringControllerTest {
         f.controller.stop()
     }
 
-    private fun TestScope.fixture(savedKey: Boolean = true): Fixture {
+    @Test fun onlyArmedThresholdsNotify(): Unit = runTest {
+        val f = fixture(thresholds = setOf(1))
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        // Roughly four hours of safe runway: past the 6h mark, which is not armed here.
+        f.provider.balanceAmount = "5"
+        f.controller.start(); runCurrent()
+        assertTrue(events.isEmpty())
+        assertNull(f.controller.state.value.activeRunwayThresholdHours)
+
+        f.provider.balanceAmount = "0.50"
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals(listOf(1), events.map { it.thresholdHours })
+        f.controller.stop()
+    }
+
+    @Test fun switchingEveryThresholdOffSilencesAlertsAndRearmingWarnsAfresh(): Unit = runTest {
+        val f = fixture()
+        val events = mutableListOf<dev.creditwatch.engine.RunwayAlertEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.controller.alertEvents.collect { events += it }
+        }
+        f.provider.balanceAmount = "5"
+        f.controller.setAlertThresholds(emptySet())
+        f.controller.start(); runCurrent()
+        assertTrue(events.isEmpty())
+        assertNull(f.controller.state.value.activeRunwayThresholdHours)
+
+        f.controller.setAlertThresholds(setOf(6, 1))
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals(listOf(6), events.map { it.thresholdHours })
+        assertEquals(6, f.controller.state.value.activeRunwayThresholdHours)
+        f.controller.stop()
+    }
+
+    private fun TestScope.fixture(
+        savedKey: Boolean = true,
+        thresholds: Set<Int> = dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS.toSet(),
+    ): Fixture {
         val clock = object : Clock() {
             override fun getZone(): ZoneId = ZoneOffset.UTC
             override fun withZone(zone: ZoneId): Clock = this
@@ -206,7 +246,8 @@ class MonitoringControllerTest {
         val history = MemoryHistory()
         val secrets = MemorySecrets(if (savedKey) "test".toCharArray() else null)
         val provider = FakeProvider(clock)
-        return Fixture(MonitoringController(secrets, history, { provider }, clock, StandardTestDispatcher(testScheduler)), history, secrets, provider, clock)
+        return Fixture(MonitoringController(secrets, history, { provider }, clock,
+            StandardTestDispatcher(testScheduler), thresholds), history, secrets, provider, clock)
     }
 
     /**

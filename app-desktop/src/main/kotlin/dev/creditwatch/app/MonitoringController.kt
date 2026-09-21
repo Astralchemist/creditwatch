@@ -4,6 +4,8 @@ import dev.creditwatch.domain.*
 import dev.creditwatch.engine.BurnCalculator
 import dev.creditwatch.engine.MonitoringCalculator
 import dev.creditwatch.engine.MonitoringSummary
+import dev.creditwatch.engine.RUNWAY_ALERT_THRESHOLDS_HOURS
+import dev.creditwatch.engine.RunwayAlertEvaluation
 import dev.creditwatch.engine.RunwayAlertEvent
 import dev.creditwatch.engine.RunwayAlertRule
 import dev.creditwatch.provider.CloudProvider
@@ -44,6 +46,7 @@ class MonitoringController(
     private val providerFactory: (CharArray) -> CloudProvider,
     private val clock: Clock = Clock.systemUTC(),
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    alertThresholdHours: Set<Int> = RUNWAY_ALERT_THRESHOLDS_HOURS.toSet(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val mutableState = MutableStateFlow(MonitoringState())
@@ -55,7 +58,8 @@ class MonitoringController(
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val alertChannel = Channel<RunwayAlertEvent>(Channel.UNLIMITED)
     val alertEvents = alertChannel.receiveAsFlow()
-    private val alertRule = RunwayAlertRule()
+    /** Null once every threshold is switched off. Read by the poll loop, written from the UI. */
+    @Volatile private var alertRule: RunwayAlertRule? = ruleFor(alertThresholdHours)
     private val alertStates = mutableMapOf<AccountId, RunwayAlertState>()
     private var pollJob: Job? = null
     private var provider: CloudProvider? = null
@@ -123,6 +127,19 @@ class MonitoringController(
                 key.fill('\u0000')
                 actionPending.set(false)
             }
+        }
+    }
+
+    /**
+     * Replaces the armed thresholds. Switching one off clears the state behind it, so arming
+     * it again later warns afresh rather than staying silent on a threshold already marked
+     * as notified.
+     */
+    fun setAlertThresholds(hours: Set<Int>) {
+        alertRule = ruleFor(hours)
+        alertStates.clear()
+        if (hours.isEmpty()) {
+            mutableState.update { it.copy(activeRunwayThresholdHours = null) }
         }
     }
 
@@ -199,8 +216,9 @@ class MonitoringController(
                         storageFailed = true
                         null
                     } ?: RunwayAlertState()
-                    val alert = alertRule.evaluate(previousAlert, summary.safeRunway, now,
+                    val alert = alertRule?.evaluate(previousAlert, summary.safeRunway, now,
                         fresh = !oldBalance && !incomplete)
+                        ?: RunwayAlertEvaluation(RunwayAlertState(), null)
                     alertStates[sample.accountId] = alert.state
                     try { history.saveRunwayAlert(sample.accountId, alert.state) }
                     catch (_: Exception) { storageFailed = true }
@@ -266,6 +284,9 @@ class MonitoringController(
 
     companion object {
         private const val SECRET_ID = "vast-default"
+
+        private fun ruleFor(hours: Set<Int>): RunwayAlertRule? =
+            hours.takeIf { it.isNotEmpty() }?.let { RunwayAlertRule(it.sorted()) }
 
         /** Covers the chart window plus the slack the one-hour burn average needs at its edge. */
         private val HISTORY_WINDOW: Duration = TREND_WINDOW.plusMinutes(2)

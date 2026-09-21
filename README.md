@@ -2,7 +2,7 @@
 
 CreditWatch is a local-first desktop utility for monitoring prepaid cloud credits. It aims to show your balance, known burn rate, estimated runway, and obvious signs of underused resources in a compact dashboard. Vast.ai is the first provider.
 
-**Status:** Private development. The app can connect with a Vast.ai key, refresh automatically every 60 seconds, and show balance, known burn, and runway from known costs. On macOS it uses Keychain, on Windows Credential Manager, and on Linux Secret Service through `secret-tool`. Linux needs `secret-tool` and an unlocked desktop keyring; connection is blocked if secure storage is unavailable. Samples are stored locally in SQLite for 72 hours. The one-hour burn average feeds safe runway when enough recent samples exist. The dashboard and compact menu bar view show one-hour trends and running instance IDs with known compute rates. Provider and action search opens below the dashboard search field. Fresh low-runway readings trigger 12h, 6h, and 1h alerts with persisted deduplication and tray notifications. Provider and monitoring tests use fake data. Real-account and cross-platform verification, burn-spike alerts, and configurable tiles remain.
+**Status:** Private development. The app can connect with a Vast.ai key, refresh automatically every 60 seconds, and show balance, known burn, and runway from known costs. On macOS it uses Keychain, on Windows Credential Manager, and on Linux Secret Service through `secret-tool`. Linux needs `secret-tool` and an unlocked desktop keyring; connection is blocked if secure storage is unavailable. Samples are stored locally in SQLite for 72 hours. The one-hour burn average feeds safe runway when enough recent samples exist. The dashboard and compact menu bar view show one-hour trends and running instance IDs with known compute rates. Provider and action search opens below the dashboard search field. Fresh low-runway readings trigger 12h, 6h, and 1h alerts with persisted deduplication and tray notifications; each threshold can be switched off, and one the runway has already fallen under cannot be armed, because it would fire at once instead of warning early. Alerts can also be published to a phone through an ntfy topic paired by QR code — while CreditWatch is running, since a sleeping computer measures nothing and therefore sends nothing. Provider and monitoring tests use fake data. Real-account and cross-platform verification, burn-spike alerts, and configurable tiles remain.
 
 ## Principles
 
@@ -62,7 +62,7 @@ The app is the composition root. The core modules must not depend on Compose, HT
 2. **Vast connection:** minimum-permission API key, OS secret store, validation, account and instance reads.
 3. **First useful view:** balance, known burn, raw runway, and safe runway with clear data quality labels.
 4. **Monitoring:** polling, bounded history, stale/offline state, backoff.
-5. **Alerts:** low-runway rules, hysteresis, persisted deduplication, and tray notifications are in place; burn-spike and efficiency alerts remain.
+5. **Alerts:** low-runway rules, hysteresis, persisted deduplication, tray notifications, per-threshold switches, and phone delivery over ntfy are in place; burn-spike and efficiency alerts remain.
 6. **Dashboard and tray:** compact tray view and search are in place; twelve configurable tiles remain.
 7. **Optional telemetry:** Linux agent and transparent efficiency hints.
 8. **Packaging:** native artifacts and release checks.

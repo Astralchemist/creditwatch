@@ -12,5 +12,10 @@
 - Linux ARM64 JDK 21 build and live Secret Service round-trip verification; Windows runtime verification remains open
 - Compact menu bar view anchored beneath the tray icon, a clearer runway-first dashboard, and running instance rows from provider data
 - Windows credential memory is wiped and closed immediately after a key is saved
+- A depleted balance says "Out of credit" in red instead of "0m", and the runway headline is coloured by health at every level
+- Area-filled trend charts that leave forecasts and gaps unfilled
+- Runway alert thresholds are switched individually, with a threshold the runway already sits under refused rather than fired immediately
+- Alerts can be published to a phone through an ntfy topic paired by QR code
+- Settings lists providers as rows, ready for a second account, and names the ones with no adapter yet
 
 No version has been released yet.

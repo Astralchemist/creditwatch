@@ -115,6 +115,37 @@ object CwIcons {
         arcToRelative(8f, 3f, 0f, false, false, 16f, 0f)
     }
 
+    /** Explains a control without a second line of text beside it. */
+    val Info = icon("info") {
+        moveTo(12f, 21f)
+        arcToRelative(9f, 9f, 0f, true, true, 0f, -18f)
+        arcToRelative(9f, 9f, 0f, true, true, 0f, 18f)
+        close()
+        moveTo(12f, 11f); verticalLineToRelative(5.2f)
+        moveTo(12f, 7.8f); verticalLineToRelative(0.2f)
+    }
+
+    /** Alerts that leave this machine. */
+    val Phone = icon("phone") {
+        moveTo(7f, 2.8f)
+        horizontalLineToRelative(10f)
+        arcToRelative(1.6f, 1.6f, 0f, false, true, 1.6f, 1.6f)
+        verticalLineToRelative(15.2f)
+        arcToRelative(1.6f, 1.6f, 0f, false, true, -1.6f, 1.6f)
+        horizontalLineTo(7f)
+        arcToRelative(1.6f, 1.6f, 0f, false, true, -1.6f, -1.6f)
+        verticalLineTo(4.4f)
+        arcTo(1.6f, 1.6f, 0f, false, true, 7f, 2.8f)
+        close()
+        moveTo(10.5f, 17.6f); horizontalLineToRelative(3f)
+    }
+
+    /** Add another provider. */
+    val Plus = icon("plus") {
+        moveTo(12f, 5f); verticalLineToRelative(14f)
+        moveTo(5f, 12f); horizontalLineToRelative(14f)
+    }
+
     private fun icon(name: String, path: PathBuilder.() -> Unit): ImageVector =
         ImageVector.Builder(
             name = name,
