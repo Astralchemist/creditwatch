@@ -140,6 +140,43 @@ object CwIcons {
         moveTo(10.5f, 17.6f); horizontalLineToRelative(3f)
     }
 
+    /** Light appearance. */
+    val Sun = icon("sun") {
+        moveTo(12f, 16f)
+        arcToRelative(4f, 4f, 0f, true, true, 0f, -8f)
+        arcToRelative(4f, 4f, 0f, true, true, 0f, 8f)
+        close()
+        moveTo(12f, 2.6f); verticalLineToRelative(2.2f)
+        moveTo(12f, 19.2f); verticalLineToRelative(2.2f)
+        moveTo(2.6f, 12f); horizontalLineToRelative(2.2f)
+        moveTo(19.2f, 12f); horizontalLineToRelative(2.2f)
+        moveTo(5.3f, 5.3f); lineToRelative(1.6f, 1.6f)
+        moveTo(17.1f, 17.1f); lineToRelative(1.6f, 1.6f)
+        moveTo(18.7f, 5.3f); lineToRelative(-1.6f, 1.6f)
+        moveTo(6.9f, 17.1f); lineToRelative(-1.6f, 1.6f)
+    }
+
+    /** Dark appearance. */
+    val Moon = icon("moon") {
+        moveTo(20.2f, 14.8f)
+        arcTo(8.6f, 8.6f, 0f, true, true, 9.2f, 3.8f)
+        arcTo(6.7f, 6.7f, 0f, false, false, 20.2f, 14.8f)
+        close()
+    }
+
+    /** Appearance follows the system: half the dial is the system's to set. */
+    val Auto = icon("auto") {
+        moveTo(12f, 21f)
+        arcToRelative(9f, 9f, 0f, true, true, 0f, -18f)
+        arcToRelative(9f, 9f, 0f, true, true, 0f, 18f)
+        close()
+        moveTo(12f, 3f); verticalLineToRelative(18f)
+        moveTo(12f, 7f); horizontalLineToRelative(3.4f)
+        moveTo(12f, 10.3f); horizontalLineToRelative(4.8f)
+        moveTo(12f, 13.7f); horizontalLineToRelative(4.8f)
+        moveTo(12f, 17f); horizontalLineToRelative(3.4f)
+    }
+
     /** Add another provider. */
     val Plus = icon("plus") {
         moveTo(12f, 5f); verticalLineToRelative(14f)

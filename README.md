@@ -4,6 +4,37 @@ CreditWatch is a local-first desktop utility for monitoring prepaid cloud credit
 
 **Status:** Private development. The app can connect with a Vast.ai key, refresh automatically every 60 seconds, and show balance, known burn, and runway from known costs. On macOS it uses Keychain, on Windows Credential Manager, and on Linux Secret Service through `secret-tool`. Linux needs `secret-tool` and an unlocked desktop keyring; connection is blocked if secure storage is unavailable. Samples are stored locally in SQLite for 72 hours. The one-hour burn average feeds safe runway when enough recent samples exist. The dashboard and compact menu bar view show one-hour trends and running instance IDs with known compute rates. Provider and action search opens below the dashboard search field. Fresh low-runway readings trigger 12h, 6h, and 1h alerts with persisted deduplication and tray notifications; each threshold can be switched off, and one the runway has already fallen under cannot be armed, because it would fire at once instead of warning early. Alerts can also be published to a phone through an ntfy topic paired by QR code — while CreditWatch is running, since a sleeping computer measures nothing and therefore sends nothing. Provider and monitoring tests use fake data. Real-account and cross-platform verification, burn-spike alerts, and configurable tiles remain.
 
+## What it looks like
+
+![The CreditWatch popover on macOS, anchored under its menu bar icon, showing an account whose credit has run out](docs/popover-depleted.png)
+
+The popover is the whole application — there is no main window. It opens under the menu bar
+icon and closes when it loses focus. The screenshot above is a real account that has reached
+zero, which is the state most worth showing, and every part of it is readable:
+
+- **Header.** A status dot, the provider name, and the sync state in one line. Green means a
+  fresh reading; amber covers saved data, rate limiting, partial data, and being offline. The
+  gear opens settings in place, the cross closes the popover.
+- **Headline.** The safe runway, which includes a 10% buffer over the higher of the current
+  burn and the one-hour average. It is coloured by health rather than being decorative: green
+  while there is room, amber once a threshold trips, red in the last hour, and red reading
+  "Out of credit" when the balance is gone. `0m` is not used for a depleted account, because a
+  countdown at zero still looks like a countdown.
+- **Depleted marker.** The triangle and the word to the right of `SAFE RUNWAY` repeat the state
+  in a second channel for anyone who cannot rely on the colour.
+- **Subline.** Why the safe figure differs from the raw one — the buffer, a missing price, a
+  stale reading, or, here, that the credit is exhausted at this burn rate.
+- **Balance and known burn.** Two tiles with area-filled sparklines over a six-hour window.
+  The balance tile turns red with the headline. The fill covers measured readings only: a
+  projection to zero is drawn as an unfilled dashed line, and a gap in the readings breaks the
+  fill rather than inventing a shape across it. A series that never moves is held at mid-height
+  so it reads as steady instead of as absent.
+- **Instances.** Running instances only, each with the chip icon, its id, its label, and its
+  known hourly compute rate. "0 running" here is consistent with the burn having collapsed to
+  storage and bandwidth once the credit ran out.
+- **Footer.** The time of the next automatic sync, and a manual refresh that is disabled during
+  a failure backoff so it cannot be used to hammer a rate-limited provider.
+
 ## Principles
 
 - Credentials stay on the user's computer in operating-system secure storage.

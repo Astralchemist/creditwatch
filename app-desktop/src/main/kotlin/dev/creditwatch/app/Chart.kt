@@ -66,12 +66,17 @@ fun Sparkline(
         val values = points.map { it.second } + listOfNotNull(forecast?.second)
         val low = bounds?.start ?: values.min()
         val high = bounds?.endInclusive ?: values.max()
-        val spread = (high - low).takeIf { it > 0f } ?: 1f
         val inset = 3.dp.toPx()
         val usable = (size.height - inset * 2).coerceAtLeast(1f)
+        // A series that never moves has no spread to scale against. Pinning it to the floor
+        // leaves a filled area of nothing; holding it mid-height draws a band that reads as
+        // "steady" instead of as "empty".
+        val flat = high - low <= 0f
+        val spread = if (flat) 1f else high - low
 
         fun x(time: Instant) = (time.toEpochMilli() - startMs) / span * size.width
-        fun y(value: Float) = size.height - inset - ((value - low) / spread * usable)
+        fun y(value: Float) =
+            if (flat) size.height / 2f else size.height - inset - ((value - low) / spread * usable)
 
         // A gap in the readings is missing data, not a flat line through it, so each run of
         // adjacent readings is its own shape. Filling one path across a gap would invent area.

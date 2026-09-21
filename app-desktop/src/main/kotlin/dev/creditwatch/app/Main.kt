@@ -438,19 +438,10 @@ private fun ColumnScope.SettingsPane(
         AlertsSection(state, alerts, onAlerts, closing)
         PhoneSection(alerts, onAlerts, onTestPhone, phoneStatus, closing)
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Caption("APPEARANCE")
-            Row(Modifier.background(panel, RoundedCornerShape(9.dp)).padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                ThemeMode.entries.forEach { entry ->
-                    val selected = entry == themeMode
-                    Box(Modifier.background(if (selected) raised else Color.Transparent, RoundedCornerShape(7.dp))
-                        .clickable { onThemeChange(entry) }
-                        .padding(horizontal = 13.dp, vertical = 7.dp)) {
-                        Text(entry.label, color = if (selected) white else muted, fontSize = 11.sp)
-                    }
-                }
-            }
+            Spacer(Modifier.weight(1f))
+            ThemeToggle(themeMode, onThemeChange, closing)
         }
 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -552,39 +543,52 @@ private fun AlertsSection(
             Hint("Notifies once when safe runway first falls past a mark, then at most every " +
                 "six hours while it stays there.")
         }
-        RUNWAY_ALERT_THRESHOLDS_HOURS.forEach { hours ->
-            val armed = hours in alerts.enabledThresholdHours
-            val arming = thresholdArming(hours, runway)
-            // An armed threshold is never taken away by the reading; only arming a new one is.
-            val blocked = !armed && !arming.isArmable()
-            val tripped = state.activeRunwayThresholdHours == hours
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("${hours}h",
-                    color = when {
-                        blocked -> muted.copy(alpha = .5f)
-                        tripped -> amber
-                        armed -> white
-                        else -> muted
-                    },
-                    fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.width(7.dp))
-                Hint(thresholdHint(hours, arming, armed, blocked))
-                if (tripped) {
-                    Spacer(Modifier.width(7.dp))
-                    Text("alerted", color = amber, fontSize = 10.sp)
+        // Three marks on one scale read better as a row than as a stack of near-identical lines.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            RUNWAY_ALERT_THRESHOLDS_HOURS.forEach { hours ->
+                val armed = hours in alerts.enabledThresholdHours
+                val arming = thresholdArming(hours, runway)
+                // An armed threshold is never taken away by the reading; only arming a new one is.
+                val blocked = !armed && !arming.isArmable()
+                val tripped = state.activeRunwayThresholdHours == hours
+                Column(Modifier.weight(1f).background(panel, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${hours}h",
+                            color = when {
+                                blocked -> muted.copy(alpha = .5f)
+                                tripped -> amber
+                                armed -> white
+                                else -> muted
+                            },
+                            fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.width(5.dp))
+                        Hint(thresholdHint(hours, arming, armed, blocked))
+                    }
+                    Switch(
+                        checked = armed,
+                        onCheckedChange = { on ->
+                            onAlerts(alerts.copy(enabledThresholdHours =
+                                if (on) alerts.enabledThresholdHours + hours
+                                else alerts.enabledThresholdHours - hours))
+                        },
+                        enabled = !blocked && !closing,
+                        colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                        modifier = Modifier.size(width = 34.dp, height = 20.dp),
+                    )
+                    // Always drawn so the three cells keep the same height as their states change.
+                    Text(
+                        when {
+                            tripped -> "alerted"
+                            blocked -> "held"
+                            else -> ""
+                        },
+                        color = if (tripped) amber else muted.copy(alpha = .7f),
+                        fontSize = 9.sp, maxLines = 1,
+                    )
                 }
-                Spacer(Modifier.weight(1f))
-                Switch(
-                    checked = armed,
-                    onCheckedChange = { on ->
-                        onAlerts(alerts.copy(enabledThresholdHours =
-                            if (on) alerts.enabledThresholdHours + hours
-                            else alerts.enabledThresholdHours - hours))
-                    },
-                    enabled = !blocked && !closing,
-                    colors = SwitchDefaults.colors(checkedThumbColor = accent),
-                    modifier = Modifier.size(width = 34.dp, height = 20.dp),
-                )
             }
         }
         if (alerts.enabledThresholdHours.isEmpty()) {
@@ -698,7 +702,7 @@ private fun PhoneSection(
 /** A hover explanation, so a control can be one word wide and still be understood. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Hint(text: String) {
+private fun Hinted(text: String, content: @Composable () -> Unit) {
     TooltipArea(
         tooltip = {
             Box(Modifier.widthIn(max = 230.dp)
@@ -710,10 +714,40 @@ private fun Hint(text: String) {
         },
         delayMillis = 250,
         tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 14.dp)),
-    ) {
-        Icon(CwIcons.Info, contentDescription = text, tint = muted.copy(alpha = .75f),
-            modifier = Modifier.size(12.dp))
+        content = content,
+    )
+}
+
+@Composable
+private fun Hint(text: String) = Hinted(text) {
+    Icon(CwIcons.Info, contentDescription = text, tint = muted.copy(alpha = .75f),
+        modifier = Modifier.size(12.dp))
+}
+
+/**
+ * Appearance in one glyph. Three labelled segments spent a third of the pane restating a choice
+ * the icon already shows, so the icon is the control: it reads as the current mode and clicking
+ * it moves to the next. The hover hint carries the words the segments used to.
+ */
+@Composable
+private fun ThemeToggle(mode: ThemeMode, onChange: (ThemeMode) -> Unit, closing: Boolean) {
+    val next = ThemeMode.entries[(mode.ordinal + 1) % ThemeMode.entries.size]
+    Hinted("Appearance: ${mode.label}. Click for ${next.label}.") {
+        Box(
+            Modifier.size(26.dp).background(panel, RoundedCornerShape(8.dp))
+                .clickable(enabled = !closing) { onChange(next) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(themeIcon(mode), contentDescription = "Appearance: ${mode.label}",
+                tint = white, modifier = Modifier.size(14.dp))
+        }
     }
+}
+
+private fun themeIcon(mode: ThemeMode) = when (mode) {
+    ThemeMode.SYSTEM -> CwIcons.Auto
+    ThemeMode.DARK -> CwIcons.Moon
+    ThemeMode.LIGHT -> CwIcons.Sun
 }
 
 private fun PhoneAlertResult.describe(): String = when (this) {

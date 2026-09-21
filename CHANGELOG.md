@@ -17,5 +17,7 @@
 - Runway alert thresholds are switched individually, with a threshold the runway already sits under refused rather than fired immediately
 - Alerts can be published to a phone through an ntfy topic paired by QR code
 - Settings lists providers as rows, ready for a second account, and names the ones with no adapter yet
+- Runway alert thresholds sit side by side, and appearance is one small icon that cycles System, Dark and Light
+- A flat trend series is held at mid-height so its fill reads as steady rather than absent
 
 No version has been released yet.
