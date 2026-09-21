@@ -900,7 +900,7 @@ private val clockFormat = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.s
 private fun formatClock(instant: Instant) = clockFormat.format(instant)
 
 private fun appVersion(): String =
-    Main::class.java.`package`?.implementationVersion ?: "0.1.0"
+    Main::class.java.`package`?.implementationVersion ?: "1.0.0"
 
 private object Main
 

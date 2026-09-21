@@ -45,10 +45,11 @@ compose.desktop {
                 // attributed to the JVM rather than to CreditWatch.
                 bundleID = "dev.creditwatch.app"
                 iconFile.set(project.file("icons/creditwatch.icns"))
-                // jpackage rejects a macOS version whose major component is zero, so the
-                // bundle version is pinned while the project is still on 0.x.
-                packageVersion = "1.0.0"
-                packageBuildVersion = "1.0.0"
+                // jpackage refuses an app-version whose major component is zero, which is why
+                // this project never shipped a 0.x: the bundle would have had to claim a
+                // version the repository did not. Keep the major at 1 or above.
+                packageVersion = project.version.toString()
+                packageBuildVersion = project.version.toString()
             }
             linux {
                 iconFile.set(project.file("icons/creditwatch.png"))
