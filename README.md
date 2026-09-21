@@ -90,9 +90,19 @@ The desktop app uses Kotlin/JVM and Compose Desktop on JDK 21. Its shared applic
 
 On this Mac, Homebrew installed JDK 21 at `/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`. If your shell still selects another JDK, set `JAVA_HOME` to that path before running the commands. Open the root directory as a Gradle project in IntelliJ IDEA and select JDK 21 as the Gradle JVM. The build requests a JDK 21 toolchain.
 
+**Packaging needs a different JDK.** `test` and `run` are happy with Homebrew's build, but Compose refuses to run `packageDmg` against it, because jpackage produces broken bundles from that distribution ([compose-multiplatform#3107](https://github.com/JetBrains/compose-multiplatform/issues/3107)). Point `JAVA_HOME` at any non-Homebrew JDK 21 — Microsoft, Temurin and Corretto builds all work — before running:
+
+```sh
+JAVA_HOME=/path/to/non-homebrew-jdk-21 ./gradlew :app-desktop:packageDmg
+```
+
+The result lands in `app-desktop/build/compose/binaries/main/dmg/`. Setting `compose.desktop.packaging.checkJdkVendor=false` silences the refusal but not the underlying problem, so it is not the way round this.
+
 ## Delivery and tracking
 
-CreditWatch is a Kotlin/JVM desktop application. It reads Vast.ai through the provider API using a locally stored key. Users will install a native desktop package when packaging is ready; npm and Bun packages are not part of the product.
+CreditWatch is a Kotlin/JVM desktop application. It reads Vast.ai through the provider API using a locally stored key. The macOS `.dmg` builds and installs; Windows `.msi` and Linux `.deb` are configured but untested. npm and Bun packages are not part of the product.
+
+**0.1.0 monitors one provider account.** The settings pane lists other providers and marks them unavailable, because only Vast.ai has an adapter. The storage schema and the burn engine are already keyed by account, but the session and the popover hold one of everything, so a second account is a 0.2.0 change rather than a configuration away.
 
 The planned app version is set once in `gradle.properties`. [Roadmap](ROADMAP.md) tracks release gates, [changelog](CHANGELOG.md) records shipped changes, and [development flow](CONTRIBUTING.md) defines issue, pull request, and release checks. GitHub Actions is configured to test and compile on macOS, Windows, and Linux for pull requests and changes to `main`. There is no automatic deployment or installer publication yet.
 

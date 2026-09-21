@@ -4,6 +4,9 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 
 ## 0.1.0 — dependable Vast monitoring
 
+Scope: one Vast.ai account, monitored from one desktop. Several providers at once is 0.2.0;
+the settings pane already says so on screen.
+
 - [x] JDK 21 multi-module desktop project
 - [x] Vast account and instance reads through a provider adapter
 - [x] Decimal balance, known burn, raw runway, and safe runway calculations
@@ -22,11 +25,22 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
 - [x] Implement Windows Credential Manager and Linux Secret Service stores ([#2](https://github.com/Astralchemist/creditwatch/issues/2))
 - [ ] Verify Windows ARM64 and x64 runtime compatibility before claiming Windows support ([#9](https://github.com/Astralchemist/creditwatch/issues/9))
 - [ ] Verify notifications and tray behavior on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
+  - [x] macOS: tray icon, popover anchoring and a real low-runway notification all fired against a
+    live account that reached zero
+  - [ ] Windows and Linux unverified
 - [ ] CI passes on macOS, Windows, and Linux ([#4](https://github.com/Astralchemist/creditwatch/issues/4))
 - [ ] Test native installers and application restart on each supported OS ([#3](https://github.com/Astralchemist/creditwatch/issues/3))
   - [x] macOS bundle builds with its own bundle id and icon, which notifications depend on
-  - [ ] Dmg, Msi and Deb packaging untested
+  - [x] macOS `.dmg` builds, installs, and records a live reading from the installed copy —
+    verified with `scripts/packaged-app-smoke.sh`, not by watching it launch. Packaging needs a
+    non-Homebrew JDK 21; Compose refuses Homebrew's, which is why this gate read as untested
+  - [x] The bundled runtime keeps the modules jlink cannot infer. `java.sql` was pruned and the
+    installed app could not open its database; `java.prefs` would have lost every saved setting
+  - [ ] Windows `.msi` and Linux `.deb` untested
 - [ ] Complete the manual acceptance cases in the build specification
+  - [x] Installed-app smoke test scripted (`scripts/packaged-app-smoke.sh`): package, install,
+    and confirm the installed binary records a reading. A unit suite cannot see this class of
+    fault, because it runs on a full JDK
 
 ## 0.2.0 — telemetry and efficiency
 
