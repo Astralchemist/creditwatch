@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CreditWatch — know how long your cloud credit will last</title>
+<meta name="description" content="A local-first macOS menu bar app that reads your prepaid cloud GPU balance, works out what you are burning, and shows the time you have left.">
+<meta property="og:title" content="CreditWatch">
+<meta property="og:description" content="Know how long your cloud credit will last.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="popover-depleted.webp">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://astralchemist.github.io/creditwatch/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9203;</text></svg>">
+</head>
+<body>
+<style>
+  :root{
+    --desk-a:#cfd8e3; --desk-b:#e7e3dd;
+    --bg:#f2f3f6; --panel:#ffffff; --sunken:#f7f8fa;
+    --sep:#e0e2e8; --hair:#eceef2;
+    --text:#14171c; --second:#6a7280; --third:#98a0ab;
+    --tint:#2c7a57; --tint-soft:#e7f1eb;
+    --amber:#a9711a; --red:#bc4638;
+    --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,ui-sans-serif,sans-serif;
+    --shadow:0 1px 2px rgba(16,20,28,.08),0 12px 34px rgba(16,20,28,.12);
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --desk-a:#1d2530; --desk-b:#2a2721;
+    --bg:#16181c; --panel:#1f2228; --sunken:#1a1d22;
+    --sep:#2e323a; --hair:#262a31;
+    --text:#eceef2; --second:#9aa2ae; --third:#6d7580;
+    --tint:#5fc496; --tint-soft:#1b2a23;
+    --amber:#d7a44a; --red:#e4715f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 40px rgba(0,0,0,.45);
+  }}
+  :root[data-theme="dark"]{
+    --desk-a:#1d2530; --desk-b:#2a2721;
+    --bg:#16181c; --panel:#1f2228; --sunken:#1a1d22;
+    --sep:#2e323a; --hair:#262a31;
+    --text:#eceef2; --second:#9aa2ae; --third:#6d7580;
+    --tint:#5fc496; --tint-soft:#1b2a23;
+    --amber:#d7a44a; --red:#e4715f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 40px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sys);font-size:16px;line-height:1.55;
+    -webkit-font-smoothing:antialiased;letter-spacing:-.006em}
+  .w{width:100%;max-width:1680px;margin:0 auto;padding-inline:clamp(20px,3.6vw,64px)}
+  h1,h2,h3{margin:0;line-height:1.14;letter-spacing:-.024em;text-wrap:balance}
+  a{color:var(--tint)}
+
+  /* a menu-bar strip, the app's actual home */
+  .menubar{background:rgba(20,23,28,.72);backdrop-filter:blur(14px);color:#f4f5f7;
+    font-size:13px;letter-spacing:-.002em;position:sticky;top:env(safe-area-inset-top,0px);z-index:20}
+  .menubar .w{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:28px}
+  .mbl{display:flex;align-items:center;gap:18px}
+  .mbl b{font-weight:600}
+  .mbr{display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;color:#dfe2e8}
+  .mbr .app{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);
+    padding:2px 8px;border-radius:5px;color:#fff;font-weight:590}
+  .mbr .app i{width:6px;height:6px;border-radius:50%;background:#5fc496;font-style:normal}
+  @media(max-width:600px){.mbl a{display:none}}
+
+  .stage{background:linear-gradient(145deg,var(--desk-a),var(--desk-b));border-bottom:1px solid var(--sep)}
+  .stage .w{padding-block:56px 60px;display:grid;gap:40px;align-items:center}
+  @media(min-width:860px){.stage .w{grid-template-columns:1.25fr .75fr}}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--panel);color:var(--second);
+    border:1px solid var(--sep);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:530}
+  .chip i{width:7px;height:7px;border-radius:50%;background:var(--tint);font-style:normal}
+  h1{font-size:clamp(34px,5vw,64px);font-weight:680;margin-block:18px 0;max-width:15ch}
+  .say{font-size:18px;color:var(--second);max-width:52ch;margin-block:16px 0}
+  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .btn{display:inline-block;padding:9px 18px;border-radius:8px;font-size:15px;font-weight:560;text-decoration:none;
+    border:1px solid var(--sep);background:var(--panel);color:var(--text);box-shadow:0 1px 1px rgba(16,20,28,.05)}
+  .btn.tinted{background:var(--tint);border-color:var(--tint);color:#fff;box-shadow:none}
+  .float{margin:0}
+  .float img{width:100%;max-width:clamp(300px,30vw,440px);height:auto;display:block;margin-inline:auto;
+    border-radius:14px;box-shadow:var(--shadow)}
+
+  section{padding-block:52px;border-bottom:1px solid var(--sep)}
+  .kicker{font-size:13px;font-weight:600;color:var(--tint);letter-spacing:-.002em}
+  h2{font-size:clamp(23px,3.4vw,31px);font-weight:670;margin-block:7px 0}
+  .sub{color:var(--second);max-width:60ch;margin-block:12px 0}
+
+  /* grouped inset rows, the way a settings pane lists things */
+  .group{margin-top:26px;background:var(--panel);border:1px solid var(--sep);border-radius:12px;overflow:hidden}
+  .grow{display:grid;gap:3px 18px;padding:15px 18px;border-bottom:1px solid var(--hair)}
+  @media(min-width:660px){.grow{grid-template-columns:minmax(230px,.55fr) 1.45fr;align-items:baseline}}
+  .grow:last-child{border-bottom:0}
+  .grow h3{font-size:15.5px;font-weight:600}
+  .grow p{margin:0;color:var(--second);font-size:15px}
+  .grow .val{color:var(--tint);font-size:13.5px;font-weight:560}
+
+  .shots{margin-top:26px;display:grid;gap:clamp(22px,2.4vw,36px);grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+  figure{margin:0}
+  figure img{width:100%;max-width:100%;height:auto;display:block;border-radius:12px;box-shadow:var(--shadow)}
+  figcaption{margin-top:13px;font-size:14.5px;color:var(--second)}
+  figcaption b{display:block;color:var(--text);font-weight:600;font-size:15px;margin-bottom:3px}
+
+  .callout{margin-top:24px;background:var(--sunken);border:1px solid var(--sep);border-left:3px solid var(--amber);
+    border-radius:10px;padding:16px 18px;max-width:68ch}
+  .callout h3{font-size:15px;font-weight:640;color:var(--amber)}
+  .callout p{margin:7px 0 0;color:var(--second);font-size:15px}
+  .callout p b{color:var(--text);font-weight:600}
+
+  footer{padding-block:28px 44px;color:var(--third);font-size:14px}
+  footer .w{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between}
+  footer a{color:var(--second);text-decoration:none}
+</style>
+
+<div class="menubar"><div class="w">
+  <span class="mbl"><b>CreditWatch</b><a href="#does" style="color:#dfe2e8;text-decoration:none">Features</a><a href="#screens" style="color:#dfe2e8;text-decoration:none">Screens</a><a href="#status" style="color:#dfe2e8;text-decoration:none">Status</a></span>
+  <span class="mbr"><span class="app"><i></i>4h 12m</span><span>Sat 21 Sep</span><span>14:12</span></span>
+</div></div>
+
+<main>
+<div class="stage"><div class="w">
+  <div>
+    <span class="chip"><i></i><span id="version-chip">Version 1.0.0 · macOS · Vast.ai</span></span>
+    <h1>Know how long your cloud credit will last.</h1>
+    <p class="say">CreditWatch lives in the menu bar. It reads your prepaid GPU balance, works out what you
+       are actually burning, and shows the time you have left — so you find out before the instances stop,
+       not after.</p>
+    <div class="row">
+      <a class="btn tinted" href="https://github.com/Astralchemist/creditwatch">View the source</a>
+      <a class="btn" href="#status">Why there is no download</a>
+    </div>
+  </div>
+  <figure class="float">
+    <img src="popover-depleted.webp" width="748" height="1050" alt="The CreditWatch popover open beneath the menu bar, showing an account whose credit has run out">
+  </figure>
+</div></div>
+
+<section id="does"><div class="w">
+  <span class="kicker">What it does</span>
+  <h2>Everything happens on your Mac</h2>
+  <p class="sub">No account, no server, nothing leaving the laptop but read-only calls to your provider.</p>
+  <div class="group">
+    <div class="grow"><h3>Safe runway</h3><p>A 10% buffer over the higher of current burn and the one-hour average, so the figure errs toward warning you early.</p></div>
+    <div class="grow"><h3>Key stored in Keychain</h3><p>Connection is blocked, with an explanation, when secure storage is unavailable. It never lands in a config file.</p></div>
+    <div class="grow"><h3>Refreshes every 60 seconds</h3><p>With backoff on failure and visible stale marking, so a quiet number is never mistaken for a current one.</p></div>
+    <div class="grow"><h3>Alerts at 12h, 6h and 1h</h3><p>Each threshold switches off on its own, with persisted deduplication. One the runway already fell under cannot be armed.</p></div>
+    <div class="grow"><h3>Alerts on your phone</h3><p>Pair an ntfy topic by scanning a QR code. Needs the app awake — a sleeping computer measures nothing.</p></div>
+    <div class="grow"><h3>72 hours of local history</h3><p>Readings are kept in SQLite on disk for three days, which is what the sparklines and the burn average draw on.</p></div>
+  </div>
+</div></section>
+
+<section id="screens"><div class="w">
+  <span class="kicker">What it looks like</span>
+  <h2>The popover is the whole application</h2>
+  <p class="sub">There is no main window. It opens under the menu bar icon and closes when it loses focus.</p>
+  <div class="shots">
+    <figure>
+      <img src="popover-depleted.webp" width="748" height="1050" loading="lazy" alt="The CreditWatch popover showing an account whose credit has run out">
+      <figcaption><b>Out of credit</b>An account at zero — the state most worth showing. It says so in words rather than counting down at 0m, because a countdown at zero still looks like a countdown.</figcaption>
+    </figure>
+    <figure>
+      <img src="settings-providers.webp" width="748" height="1050" loading="lazy" alt="Settings listing Vast.ai as connected, with RunPod, Lambda and Paperspace marked unavailable">
+      <figcaption><b>Providers</b>Only Vast.ai has an adapter today. The rest are listed and visibly unavailable, so you learn it here rather than by hunting for it.</figcaption>
+    </figure>
+    <figure>
+      <img src="settings-alerts.webp" width="748" height="1050" loading="lazy" alt="Settings showing three runway alert thresholds side by side as switches, and a phone alert toggle">
+      <figcaption><b>Alerts</b>A cell marks itself <em>alerted</em> when it is the tripped one, and <em>held</em> when it cannot be armed.</figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<section id="limits"><div class="w">
+  <span class="kicker">Being straight with you</span>
+  <h2>What 1.0.0 does not do</h2>
+  <div class="group">
+    <div class="grow"><h3>One account at a time</h3><p>The settings pane lists the others and marks them unavailable. Several at once is a 1.1.0 change.</p></div>
+    <div class="grow"><h3>Phone alerts need the app awake</h3><p>A sleeping computer measures nothing, so nothing is sent while it sleeps.</p></div>
+    <div class="grow"><h3>macOS only</h3><p>The Windows and Linux credential stores are written and unit tested, and the Linux round trip passes headless — but nobody has run the desktop app there.</p></div>
+    <div class="grow"><h3>Bandwidth is not in burn</h3><p>Treated as an unknown cost and left out rather than guessed at.</p></div>
+    <div class="grow"><h3>Apple Silicon only</h3><p>The build is arm64. It will not run on an Intel Mac.</p></div>
+  </div>
+</div></section>
+
+<section id="status"><div class="w">
+  <span class="kicker">Status</span>
+  <h2>Why there is no download button</h2>
+  <p class="sub">macOS flags anything a browser downloads. On a flagged app, Gatekeeper wants a signature
+     traceable to a registered developer and a notarization ticket from Apple. CreditWatch has neither yet,
+     so a downloaded build would simply be refused — and since macOS 15 the right-click-to-open workaround is gone.</p>
+  <div class="callout">
+    <h3>Signing pending</h3>
+    <p><b>The build is already wired for signing</b> and switches on the moment a certificate exists. Rather
+       than ship a file that makes you fight your own operating system, the download arrives when it is
+       signed. Building from source takes one command.</p>
+  </div>
+  <div class="row">
+    <a class="btn tinted" href="https://github.com/Astralchemist/creditwatch">View the source</a>
+    <a class="btn" href="https://github.com/Astralchemist/creditwatch/releases/latest">Release notes</a>
+  </div>
+</div></section>
+</main>
+
+<footer><div class="w">
+  <span>CreditWatch — local-first cloud credit monitoring</span>
+  <span><a href="https://github.com/Astralchemist/creditwatch">Source</a> · <a href="https://github.com/Astralchemist/creditwatch/blob/main/ROADMAP.md">Roadmap</a> · <span id="version-foot">v1.0.0</span></span>
+</div></footer>
+
+<script>
+  (function () {
+    var chip = document.getElementById("version-chip");
+    var foot = document.getElementById("version-foot");
+    if (!chip) return;
+    fetch("https://api.github.com/repos/Astralchemist/creditwatch/releases/latest",
+          { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (rel) {
+        if (!rel || !rel.tag_name) return;
+        var v = String(rel.tag_name).replace(/^v/, "");
+        chip.textContent = "Version " + v + " \u00b7 macOS \u00b7 Vast.ai";
+        if (foot) foot.textContent = "v" + v;
+      })
+      .catch(function () { /* keep the served values */ });
+  })();
+</script>
+
+</body>
+</html>
