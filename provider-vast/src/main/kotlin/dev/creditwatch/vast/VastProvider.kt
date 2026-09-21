@@ -16,6 +16,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import io.ktor.utils.io.readAvailable
 import java.math.BigDecimal
@@ -89,7 +92,40 @@ class VastProvider(
             computeRate = dto.pricing?.gpuCostPerHour?.decimal()?.let { MoneyRate(it, usd) },
             storageRate = dto.pricing?.diskHour?.decimal()?.let { MoneyRate(it, usd) },
             label = dto.label,
+            endpoint = endpointOf(dto),
         )
+    }
+
+    /**
+     * The address fields, which are not part of what this adapter is verified against.
+     *
+     * UNVERIFIED: the shapes below follow Vast's documented instance schema, but no live
+     * instance has confirmed them — the account had none running when this was written. They
+     * are therefore parsed defensively rather than declared: a field that arrives in an
+     * unexpected shape yields no endpoint instead of failing the whole instance list, because
+     * a wrong guess here must not be able to stop balance and burn from being read.
+     */
+    private fun endpointOf(dto: InstanceDto): InstanceEndpoint? {
+        val ports = publishedPorts(dto.ports)
+        val ip = dto.publicIpAddr?.takeIf(String::isNotBlank)
+        val sshHost = dto.sshHost?.takeIf(String::isNotBlank)
+        val sshPort = dto.sshPort?.content?.toIntOrNull()?.takeIf { it in 1..65535 }
+        if (ip == null && sshHost == null && ports.isEmpty()) return null
+        return InstanceEndpoint(ip, sshHost, sshPort, ports)
+    }
+
+    /** Docker's binding map: `{"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "41234"}]}`. */
+    private fun publishedPorts(element: JsonElement?): Map<Int, Int> {
+        val bindings = element as? JsonObject ?: return emptyMap()
+        return bindings.entries.mapNotNull { (key, value) ->
+            val container = key.substringBefore('/').toIntOrNull()?.takeIf { it in 1..65535 }
+                ?: return@mapNotNull null
+            val host = (value as? JsonArray)?.firstNotNullOfOrNull { binding ->
+                ((binding as? JsonObject)?.get("HostPort") as? JsonPrimitive)
+                    ?.content?.toIntOrNull()?.takeIf { it in 1..65535 }
+            } ?: return@mapNotNull null
+            container to host
+        }.toMap()
     }
 
     override fun eraseCredential() = apiKey.fill('\u0000')
@@ -191,6 +227,12 @@ private data class InstanceDto(
     @SerialName("actual_status") val actualStatus: String? = null,
     val label: String? = null,
     @SerialName("instance") val pricing: InstancePricingDto? = null,
+    // Address fields: see endpointOf. Held as raw JSON so an unexpected shape cannot throw
+    // during decoding and take the whole page with it.
+    @SerialName("public_ipaddr") val publicIpAddr: String? = null,
+    @SerialName("ssh_host") val sshHost: String? = null,
+    @SerialName("ssh_port") val sshPort: JsonPrimitive? = null,
+    val ports: JsonElement? = null,
 )
 
 @Serializable

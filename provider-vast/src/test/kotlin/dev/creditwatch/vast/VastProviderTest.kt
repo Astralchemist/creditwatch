@@ -20,6 +20,9 @@ import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class VastProviderTest {
@@ -147,6 +150,49 @@ class VastProviderTest {
             assertEquals(BigDecimal("24.18"), provider.getAccountSnapshot().balance.amount)
             provider.eraseCredential()
             assertFailsWith<IllegalStateException> { provider.getAccountSnapshot() }
+        } finally { client.close() }
+    }
+
+    @Test
+    fun readsPublishedPortsAndAddressesWhenTheProviderReportsThem(): Unit = runBlocking {
+        val client = mockClient { respond(fixture("instances-with-endpoint.json")) }
+        try {
+            val instances = VastProvider(client, "sample-key".toCharArray(), clock).getInstances()
+            val served = instances.first { it.id.value == "18421" }
+            val endpoint = assertNotNull(served.endpoint)
+            assertEquals("203.0.113.41", endpoint.publicIp)
+            assertEquals("ssh5.vast.ai", endpoint.sshHost)
+            assertEquals(41022, endpoint.sshPort)
+            assertEquals(mapOf(8080 to 41234, 22 to 41022), endpoint.publishedPorts)
+            assertEquals(41234, endpoint.hostPortFor(8080))
+            assertNull(endpoint.hostPortFor(9999))
+            assertTrue(endpoint.isReachable)
+
+            // An instance created without spare ports has an address and nothing to poll on it.
+            val unreachable = assertNotNull(instances.first { it.id.value == "18422" }.endpoint)
+            assertEquals("203.0.113.42", unreachable.publicIp)
+            assertTrue(unreachable.publishedPorts.isEmpty())
+            assertFalse(unreachable.isReachable)
+        } finally { client.close() }
+    }
+
+    @Test
+    fun anUnexpectedAddressShapeCostsTheEndpointAndNothingElse(): Unit = runBlocking {
+        val client = mockClient { respond(fixture("instances-odd-ports.json")) }
+        try {
+            val instances = VastProvider(client, "sample-key".toCharArray(), clock).getInstances()
+            assertEquals(2, instances.size)
+
+            // Ports arriving as a list instead of a map: the rest of the instance still reads.
+            val listShaped = instances.first { it.id.value == "18423" }
+            assertEquals(BigDecimal("0.5"), listShaped.computeRate?.amountPerHour)
+            assertEquals("203.0.113.43", listShaped.endpoint?.publicIp)
+            assertTrue(listShaped.endpoint?.publishedPorts.orEmpty().isEmpty())
+            assertNull(listShaped.endpoint?.sshPort)
+
+            // A binding with no HostPort is not a port anyone can reach.
+            val noHostPort = instances.first { it.id.value == "18424" }
+            assertNull(noHostPort.endpoint)
         } finally { client.close() }
     }
 

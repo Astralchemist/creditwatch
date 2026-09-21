@@ -1,0 +1,11 @@
+{"success":true,"instances":[
+  {"id":18421,"actual_status":"running","label":"training",
+   "instance":{"gpuCostPerHour":0.6,"diskHour":0.03},
+   "public_ipaddr":"203.0.113.41","ssh_host":"ssh5.vast.ai","ssh_port":"41022",
+   "ports":{"8080/tcp":[{"HostIp":"0.0.0.0","HostPort":"41234"}],
+            "22/tcp":[{"HostIp":"0.0.0.0","HostPort":"41022"}],
+            "6006/udp":[]}},
+  {"id":18422,"actual_status":"running","label":"no ports asked for",
+   "instance":{"gpuCostPerHour":0.4,"diskHour":0.01},
+   "public_ipaddr":"203.0.113.42","ports":{}}
+]}

@@ -19,5 +19,8 @@
 - Settings lists providers as rows, ready for a second account, and names the ones with no adapter yet
 - Runway alert thresholds sit side by side, and appearance is one small icon that cycles System, Dark and Light
 - A flat trend series is held at mid-height so its fill reads as steady rather than absent
+- Instance address and published ports are read from Vast where reported, for a future telemetry
+  agent the desktop polls; unverified against a live instance and parsed so a surprise cannot
+  break the instance list
 
 No version has been released yet.

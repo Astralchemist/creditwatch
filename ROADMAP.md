@@ -39,6 +39,13 @@ Track individual features and bugs as GitHub Issues. Assign each issue to the ne
   account, the controller holds one provider and one `vast-default` secret, and the headline
   shows one runway — a second account needs all four
 - [ ] A second provider adapter, RunPod first
+- [ ] Telemetry agent paired to the desktop ([#7](https://github.com/Astralchemist/creditwatch/issues/7)).
+  The agent is polled by the desktop rather than calling home, since a laptop behind NAT is not
+  reachable from a rented instance
+  - [x] Map the instance address and published ports the poll would need, parsed defensively
+  - [ ] Confirm `public_ipaddr`, `ssh_port` and the `ports` shape against a live instance with
+    `scripts/vast-preflight.sh`. If no port can be published, the pull design does not work and
+    the agent needs a relay instead
 - [ ] Reach a phone while the computer sleeps. Publishing from the desktop shipped in 0.1.0 and
   covers only a running app; anything further needs an always-on monitor, which is a decision
   against the "no central backend" principle rather than a feature

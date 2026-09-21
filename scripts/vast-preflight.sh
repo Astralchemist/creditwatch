@@ -117,6 +117,28 @@ if [ "$code" = "200" ]; then
             || info 'instance.diskHour absent -> storage counted as an unknown cost (by design)'
         info "instance[0] keys under .instance: $(jq -r '.instances[0].instance|[keys[]]|join(", ")' "$body" 2>/dev/null | cut -c1-160)"
         info "your instances: $(jq -r '[.instances[].id]|join(", ")' "$body" 2>/dev/null)"
+
+        echo
+        echo "3. Reachability  (VastProvider.endpointOf -- UNVERIFIED against a live instance)"
+        info "Decides whether a telemetry agent inside the instance can be polled from here."
+        ip=$(jq -r '.instances[0].public_ipaddr // "null"' "$body" 2>/dev/null)
+        [ "$ip" != "null" ] && [ -n "$ip" ] \
+            && ok "public_ipaddr present: $ip" \
+            || bad 'public_ipaddr missing -- nothing to poll an agent on'
+        sh_host=$(jq -r '.instances[0].ssh_host // "null"' "$body" 2>/dev/null)
+        sh_port=$(jq -r '.instances[0].ssh_port // "null"' "$body" 2>/dev/null)
+        info "ssh_host: $sh_host    ssh_port: $sh_port"
+        if jq -e '.instances[0].ports|type == "object"' "$body" >/dev/null 2>&1; then
+            ok 'ports is an object, as the parser expects'
+            info "ports: $(jq -rc '.instances[0].ports' "$body" 2>/dev/null | cut -c1-200)"
+            jq -e '[.instances[0].ports[]?|arrays|.[]?|objects|has("HostPort")]|any' "$body" >/dev/null 2>&1 \
+                && ok 'at least one binding carries HostPort -- an agent port can be published' \
+                || bad 'no binding carries HostPort -- this instance exposes nothing to poll'
+        else
+            t=$(jq -r '.instances[0].ports|type' "$body" 2>/dev/null)
+            bad "ports is \"$t\", not an object -- the parser yields no endpoint (it will not crash)"
+        fi
+        info "instance[0] top-level keys: $(jq -r '.instances[0]|[keys[]]|join(", ")' "$body" 2>/dev/null | cut -c1-240)"
     else
         bad "no instances returned -- burn rate would be zero and runway unbounded"
     fi
