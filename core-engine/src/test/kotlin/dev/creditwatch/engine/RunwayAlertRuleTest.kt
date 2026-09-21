@@ -43,6 +43,18 @@ class RunwayAlertRuleTest {
         assertNull(rule.evaluate(active, RunwayResult.Unavailable, now.plusSeconds(60), true).event)
     }
 
+    @Test fun aThresholdThisRuleDoesNotHaveIsNeverRevived() {
+        // The carried state names 12h, but this rule has only 1h and 6h: the user switched 12h
+        // off, and the stored row outlived the change.
+        val carried = RunwayAlertState(activeThresholdHours = 12, lastNotifiedAt = now)
+        val narrowed = RunwayAlertRule(listOf(1, 6))
+        val afterCooldown = narrowed.evaluate(carried, hours(9), now.plus(Duration.ofHours(6)), true)
+        assertNull(afterCooldown.event)
+        assertNull(afterCooldown.state.activeThresholdHours)
+        // A mark that is still armed warns as usual, carrying no memory of the one that was not.
+        assertEquals(6, narrowed.evaluate(carried, hours(5), now.plusSeconds(60), true).event?.thresholdHours)
+    }
+
     @Test fun cooldownAndZeroBurnAreHandled() {
         val active = rule.evaluate(RunwayAlertState(), hours(5), now, true).state
         assertNull(rule.evaluate(active, hours(5), now.plus(Duration.ofHours(5)), true).event)
