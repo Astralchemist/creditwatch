@@ -106,6 +106,49 @@ JAVA_HOME=/path/to/non-homebrew-jdk-21 ./gradlew :app-desktop:packageDmg
 
 The result lands in `app-desktop/build/compose/binaries/main/dmg/`. Setting `compose.desktop.packaging.checkJdkVendor=false` silences the refusal but not the underlying problem, so it is not the way round this.
 
+### Signing and notarization
+
+**Not in effect for 1.0.0.** No certificate is configured, so the `.dmg` that this repository builds today is ad-hoc signed and unnotarized: it runs on the machine that built it and Gatekeeper refuses it anywhere else. The build below is wired for signing and stays dormant until credentials exist. Treat 1.0.0 as a build you install yourself, not one you hand to someone.
+
+An unsigned `.dmg` installs here and nowhere else. macOS attaches a quarantine flag to anything a browser downloads, and on a quarantined bundle Gatekeeper demands two things a plain `packageDmg` build does not have: a signature from a certificate Apple can trace to a developer, and a notarization ticket saying Apple has scanned the contents. Without them the app is refused outright, and since macOS 15 the old right-click-to-open escape hatch is gone — the person has to walk into System Settings to override it. A locally built copy is never quarantined, which is why the gap is invisible until someone else downloads the file.
+
+Signing is a hash of every file in the bundle, sealed with a private key only you hold. It proves the bundle is yours and that nothing altered it in transit; it says nothing about whether it is safe. Notarization is the other half: Apple scans the signed artifact, and returns a ticket that `stapler` writes into the `.dmg` so an offline machine can still verify it. Both are needed. Neither is a review — Apple does not approve the app, it only attests to who built it and that its scan found no malware.
+
+The build signs only when an identity is configured, so a contributor without a certificate still gets a working ad-hoc build from the same command.
+
+**One-time setup.** A [Developer Program](https://developer.apple.com/programs/) membership is required; Developer ID certificates are not issued on free accounts.
+
+1. In Xcode, Settings → Accounts → Manage Certificates → **+** → **Developer ID Application**. Confirm it landed:
+   ```sh
+   security find-identity -v -p codesigning
+   ```
+   The name in that output, in full, is the signing identity — `Developer ID Application: Your Name (TEAMID)`.
+2. Create an app-specific password at [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords. The Apple ID password itself will not work.
+3. Put the three values in `~/.gradle/gradle.properties` — user-level, never the repository, and `chmod 600` it:
+   ```properties
+   compose.desktop.mac.signing.identity=Developer ID Application: Your Name (TEAMID)
+   compose.desktop.mac.notarization.appleID=you@example.com
+   compose.desktop.mac.notarization.password=abcd-efgh-ijkl-mnop
+   compose.desktop.mac.notarization.teamID=TEAMID
+   ```
+   `CREDITWATCH_SIGNING_IDENTITY`, `CREDITWATCH_NOTARIZATION_APPLE_ID`, `CREDITWATCH_NOTARIZATION_PASSWORD` and `CREDITWATCH_NOTARIZATION_TEAM_ID` work as environment variables instead, for CI or for keeping the password in the Keychain rather than on disk.
+
+**Releasing.** `notarizeDmg` packages, signs, uploads to Apple, waits for the verdict, and staples the ticket:
+
+```sh
+JAVA_HOME=/path/to/non-homebrew-jdk-21 ./gradlew :app-desktop:notarizeDmg
+```
+
+Apple usually answers in minutes, occasionally in an hour. Then confirm the result on the artifact rather than trusting the build log:
+
+```sh
+./scripts/verify-signature.sh
+```
+
+`spctl` must say **accepted**, and `stapler validate` must find a ticket. Until both pass, the file is not distributable no matter how cleanly it built.
+
+**What this does not fix.** The bundle is still arm64-only — signing does not make it run on Intel Macs. Signing is also per-machine setup: nothing in CI packages the app today, so releases are built by hand.
+
 ## Delivery and tracking
 
 CreditWatch is a Kotlin/JVM desktop application. It reads Vast.ai through the provider API using a locally stored key. The macOS `.dmg` builds and installs; Windows `.msi` and Linux `.deb` are configured but untested. npm and Bun packages are not part of the product.
